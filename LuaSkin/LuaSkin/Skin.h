@@ -42,8 +42,17 @@ extern int luaopen_luaskin_internal(lua_State* L) ; // entry vector to luaskin.m
 #endif
  */
 
+#pragma mark - LuaSkin typedefs/defines
+
 // Define a break variable for the reference checker
 #define LS_RBREAK INT_MIN
+
+typedef int LSRefTable;
+
+#define LSUUIDLen 37
+typedef struct LSGCCanary {
+    char uuid[LSUUIDLen];
+} LSGCCanary;
 
 // Define some bits for masking operations in the argument checker
 /*!
@@ -153,6 +162,13 @@ NSString *specMaskToString(int spec);
  @abstract Delegate method for passing control back to the parent environment for environment specific handling.  Curerntly only offers support for passing log messages back to the parent environment for display or processing.
  */
 @protocol LuaSkinDelegate <NSObject>
+
+/*!
+ @abstract LuaSkin has been unable to perform a vital operation, the delegate should make the attached message visible to the user and then exit
+ @param message A message to display to the user
+ */
+- (void)handleCatastrophe:(NSString *)message;
+
 @optional
 /*!
  @abstract Pass log level and message back to parent for handling and/or display
@@ -161,6 +177,13 @@ NSString *specMaskToString(int spec);
  @param theMessage The text of the message to be logged.
  */
 - (void)logForLuaSkinAtLevel:(int)level withMessage:(NSString *)theMessage ;
+
+/*!
+ @abstract Log a known, but avoided issue via the log delegate, primarily to ensure it can be recorded in a crash reporting service
+ @discussion If no delegate has been assigned, the message is logged to the system logs via NSLog.
+ @param message The message to log
+ */
+- (void)logKnownBug:(NSString *)message, ...;
 @end
 
 /*!
@@ -188,7 +211,32 @@ NSString *specMaskToString(int spec);
  */
 @property (class, readonly, atomic) lua_State *mainLuaState ;
 
+@property (atomic) NSUUID *uuid;
+
 #pragma mark - Class lifecycle
+
+/*!
+ @abstract Entrypoint from Lua to C
+
+ This macro should be called at the start of every C function that is accessible from Lua. Its job is to create a LuaSkin object and validate the arguments expected to have been passed from Lua.
+  It is a wrapper that performs:
+ <pre>@textblock
+  [LuaSkin sharedWithState:L];
+  [skin checkArgs:__VA_ARGS__];
+ @/textblock</pre>
+
+ <br> If the arguments are incorrect, this call will never return and the user will get a nice Lua traceback instead
+ @discussion Each argument can use boolean OR's to allow multiple types to be accepted (e.g. LS_TNIL | LS_TBOOLEAN).
+
+ Each argument can be OR'd with LS_TOPTIONAL to indicate that the argument is optional.
+
+ LS_TUSERDATA arguments should be followed by a string containing the metatable tag name (e.g. "hs.screen" for objects from hs.screen).
+
+ @warning The final argument MUST be LS_TBREAK, to signal the end of the list
+
+ @param firstArg - An integer that defines the first acceptable Lua argument type. Possible values are defined @link //apple_ref/doc/title:macro/BitmasksforLuatypechecking here @/link. Followed by zero or more integers of the same possible values. The final value MUST be LS_TBREAK
+ */
+#define LS_API(...) [LuaSkin sharedWithState:L]; [skin checkArgs:__VA_ARGS__];
 
 /*!
  @abstract Returns the singleton LuaSkin.Skin object
@@ -234,6 +282,10 @@ NSString *specMaskToString(int spec);
  @abstract Recreates the Lua environment in the LuaSkin object, from scratch
  */
 - (void)resetLuaState;
+
+- (BOOL)checkGCCanary:(LSGCCanary)canary;
+- (LSGCCanary)createGCCanary;
+- (void)destroyGCCanary:(LSGCCanary *)canary;
 
 #pragma mark - Methods for calling into Lua from C
 
@@ -302,14 +354,49 @@ NSString *specMaskToString(int spec);
     {NULL, NULL} // Library arrays must always end with this
  };
 
+ [luaSkin registerLibrary:"myShinyLibrary" functions:myShinyLibrary metaFunctions:myShinyMetaLibrary];
+ @/textblock</pre>
+
+ @param libraryName - A C string containing the name of the library
+ @param functions - A static array of mappings between Lua function names and C function pointers. This provides the public API of the Lua library
+ @param metaFunctions - A static array of mappings between special meta Lua function names (such as <tt>__gc</tt>) and C function pointers
+ @return A Lua reference to the table created for this library to store its own references
+ */
+- (LSRefTable)registerLibrary:(const char *)libraryName functions:(const luaL_Reg *)functions metaFunctions:(const luaL_Reg *)metaFunctions;
+
+/*!
+ @abstract (DEPRECATED) Defines a Lua library and creates a references table for the library
+ @discussion Lua libraries defined in C are simple mappings between Lua function names and C function pointers.
+
+ NOTE: You should be using - (int)registerLibrary:(const char *)libraryName functions:(const luaL_Reg *)functions metaFunctions:(const luaL_Reg *)metaFunctions;
+
+ A library consists of a series of Lua functions that are exposed to the user, and (optionally) several special Lua functions that will be used by Lua itself. The most common of these is <tt>__gc</tt> which will be called when Lua is performing garbage collection for the library.
+ These "special" functions are stored in the library's metatable. Other common metatable functions include <tt>__tostring</tt> and <tt>__index</tt>.
+
+ The mapping between Lua functions and C functions is done using an array of type <tt>luaL_Reg</tt>
+
+ Every C function pointed to in a <tt>luaL_Reg</tt> array must have the signature: <tt>static int someFunction(lua_State *L);</tt>
+
+ Here is some sample code:
+ <pre>@textblock
+ static const luaL_Reg myShinyLibrary[] = {
+    {"doThing", function_doThing},
+    {NULL, NULL} // Library arrays must always end with this
+ };
+
+ static const luaL_Reg myShinyMetaLibrary[] = {
+    {"__gc", function_doLibraryCleanup},
+    {NULL, NULL} // Library arrays must always end with this
+ };
+
  [luaSkin registerLibrary:myShinyLibrary metaFunctions:myShinyMetaLibrary];
  @/textblock</pre>
 
  @param functions - A static array of mappings between Lua function names and C function pointers. This provides the public API of the Lua library
  @param metaFunctions - A static array of mappings between special meta Lua function names (such as <tt>__gc</tt>) and C function pointers
- @return A Lua reference to the table created for this library to store its own references
+ @return An opaque reference to the table created for this library to store its own references
  */
-- (int)registerLibrary:(const luaL_Reg *)functions metaFunctions:(const luaL_Reg *)metaFunctions;
+- (LSRefTable)registerLibrary:(const luaL_Reg *)functions metaFunctions:(const luaL_Reg *)metaFunctions __attribute__((deprecated("Please use the version of registerLibrary that takes the library name argument","registerLibrary:functions:metaFunctions:")));
 
 /*!
  @abstract Defines a Lua library that creates objects, which have methods
@@ -342,9 +429,9 @@ NSString *specMaskToString(int spec);
  @param functions - A static array of mappings between Lua function names and C function pointers. This provides the public API of the Lua library
  @param metaFunctions - A static array of mappings between special meta Lua function names (such as "__gc") and C function pointers
  @param objectFunctions - A static array of mappings between Lua object method names and C function pointers. This provides the public API of objects created by this library. Note that this object is also used as the metatable, so special functions (e.g. "__gc") should be included here
- @return A Lua reference to the table created for this library to store its own references
+ @return An opaque reference to the table created for this library to store its own references
  */
-- (int)registerLibraryWithObject:(const char *)libraryName functions:(const luaL_Reg *)functions metaFunctions:(const luaL_Reg *)metaFunctions objectFunctions:(const luaL_Reg *)objectFunctions;
+- (LSRefTable)registerLibraryWithObject:(const char *)libraryName functions:(const luaL_Reg *)functions metaFunctions:(const luaL_Reg *)metaFunctions objectFunctions:(const luaL_Reg *)objectFunctions;
 
 /*!
  @abstract Defines a Lua object with methods
@@ -374,7 +461,7 @@ NSString *specMaskToString(int spec);
  @abstract Stores a reference to the object at the top of the Lua stack, in the supplied table, and pops the object off the stack
  <br> This method is functionally analogous to luaL_ref(), it just takes care of pushing the supplied table ref onto the stack, and removes it afterwards
 
- @param refTable - An integer reference to a table, (e.g. the result of a previous luaRef on a table object or the result of the module's registration through registerLibrary:metaFunctions: or registerLibraryWithObject:functions:metaFunctions:objectFunctions:)
+ @param refTable - An opaque reference to a table, (e.g. the result of a previous luaRef on a table object or the result of the module's registration through registerLibrary:metaFunctions: or registerLibraryWithObject:functions:metaFunctions:objectFunctions:)
  @return An integer reference to the object that was at the top of the stack
  */
 - (int)luaRef:(int)refTable;
@@ -382,7 +469,7 @@ NSString *specMaskToString(int spec);
 /*!
  @abstract Stores a reference to the object at the specified position of the Lua stack, in the supplied table, without removing the object from the stack
 
- @param refTable - An integer reference to a table, (e.g. the result of a previous luaRef on a table object or the result of the module's registration through registerLibrary:metaFunctions: or registerLibraryWithObject:functions:metaFunctions:objectFunctions:)
+ @param refTable - An opaque reference to a table, (e.g. the result of a previous luaRef on a table object or the result of the module's registration through registerLibrary:metaFunctions: or registerLibraryWithObject:functions:metaFunctions:objectFunctions:)
  @param idx - An integer stack position
  @return An integer reference to the object at the specified stack position
  */
@@ -393,7 +480,7 @@ NSString *specMaskToString(int spec);
 
  <br> This method is functionally analogous to luaL_unref(), it just takes care of pushing the supplied table ref onto the Lua stack, and removes it afterwards
 
- @param refTable - An integer reference to a table, (e.g. the result of a previous luaRef on a table object or the result of the module's registration through registerLibrary:metaFunctions: or registerLibraryWithObject:functions:metaFunctions:objectFunctions:)
+ @param refTable - An opaque reference to a table, (e.g. the result of a previous luaRef on a table object or the result of the module's registration through registerLibrary:metaFunctions: or registerLibraryWithObject:functions:metaFunctions:objectFunctions:)
  @param ref - An integer reference for an object that should be removed from the refTable table
  @return An integer, always LUA_NOREF (you are advised to store this value in the variable containing the ref parameter, so it does not become a stale reference)
  */
@@ -404,7 +491,7 @@ NSString *specMaskToString(int spec);
 
  <br> This method is functionally analogous to lua_rawgeti(), it just takes care of pushing the supplied table ref onto the Lua stack, and removes it afterwards
 
- @param refTable - An integer reference to a table, (e.g. the result of a previous luaRef on a table object or the result of the module's registration through registerLibrary:metaFunctions: or registerLibraryWithObject:functions:metaFunctions:objectFunctions:)
+ @param refTable - An opaque reference to a table, (e.g. the result of a previous luaRef on a table object or the result of the module's registration through registerLibrary:metaFunctions: or registerLibraryWithObject:functions:metaFunctions:objectFunctions:)
  @param ref - An integer reference for an object that should be pushed onto the stack
  @return An integer containing the Lua type of the object pushed onto the stack
  */
@@ -482,13 +569,14 @@ NSString *specMaskToString(int spec);
 
  <br> Use luaUnref:ref: to release an object retained by this method. Returns LUA_NOREF if canPushNSObject: returns NO.
 
- @param refTable - An integer reference to a table, (e.g. the result of a previous luaRef on a table object or the result of the module's registration through registerLibrary:metaFunctions: or registerLibraryWithObject:functions:metaFunctions:objectFunctions:)
+ @param refTable - An opaque reference to a table, (e.g. the result of a previous luaRef on a table object or the result of the module's registration through registerLibrary:metaFunctions: or registerLibraryWithObject:functions:metaFunctions:objectFunctions:)
 
  @param object an NSObject
 
  @return An integer reference to the object that was at the top of the stack
  */
 - (int)luaRef:(int)refTable forNSObject:(id)object ;
+
 
 #pragma mark - Conversion from NSObjects into Lua objects
 
@@ -838,6 +926,13 @@ NSString *specMaskToString(int spec);
  @param theMessage the message to log
  */
 - (void)logBreadcrumb:(NSString *)theMessage ;
+
+/*!
+ @abstract Log a known, but avoided issue via the log delegate, primarily to ensure it can be recorded in a crash reporting service
+ @discussion If no delegate has been assigned, the message is logged to the system logs via NSLog.
+ @param message The message to log
+ */
+- (void)logKnownBug:(NSString *)message;
 
 // FIXME: Should this be documented? Seems unnecessary to do so, at the moment
 + (void)classLogAtLevel:(int)level withMessage:(NSString *)theMessage;
