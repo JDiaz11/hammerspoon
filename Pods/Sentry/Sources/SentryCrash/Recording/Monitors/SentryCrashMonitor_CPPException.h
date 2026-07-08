@@ -1,3 +1,4 @@
+// Adapted from: https://github.com/kstenerud/KSCrash
 //
 //  SentryCrashMonitor_CPPException.h
 //
@@ -25,15 +26,26 @@
 #ifndef HDR_SentryCrashMonitor_CPPException_h
 #define HDR_SentryCrashMonitor_CPPException_h
 
+#include "SentryCrashMonitor.h"
+#include "SentryCrashStackCursor.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#include "SentryCrashMonitor.h"
-
 /** Access the Monitor API.
  */
 SentryCrashMonitorAPI *sentrycrashcm_cppexception_getAPI(void);
+
+void sentrycrashcm_cppexception_enable_swap_cxa_throw(void);
+
+/** For testing.
+ */
+void sentrycrashcm_cppexception_callOriginalTerminationHandler(void);
+
+/** For testing.
+ */
+SentryCrashStackCursor sentrycrashcm_cppexception_getStackCursor(void);
 
 #ifdef __cplusplus
 }

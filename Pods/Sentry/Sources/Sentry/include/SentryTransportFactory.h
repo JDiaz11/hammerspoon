@@ -1,16 +1,19 @@
-#import <Foundation/Foundation.h>
-
 #import "SentryTransport.h"
 
-@class SentryOptions, SentryFileManager;
+@class SentryFileManager;
+@class SentryOptions;
+@protocol SentryCurrentDateProvider;
+@protocol SentryRateLimits;
 
 NS_ASSUME_NONNULL_BEGIN
 
 NS_SWIFT_NAME(TransportInitializer)
 @interface SentryTransportFactory : NSObject
 
-+ (id<SentryTransport>)initTransport:(SentryOptions *)options
-                   sentryFileManager:(SentryFileManager *)sentryFileManager;
++ (NSArray<id<SentryTransport>> *)initTransports:(SentryOptions *)options
+                                    dateProvider:(id<SentryCurrentDateProvider>)dateProvider
+                               sentryFileManager:(SentryFileManager *)sentryFileManager
+                                      rateLimits:(id<SentryRateLimits>)rateLimits;
 
 @end
 

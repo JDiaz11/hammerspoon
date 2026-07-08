@@ -1,25 +1,29 @@
 #import "SentryCrashDynamicLinker.h"
 #import "SentryCrashStackCursor.h"
 #import "SentryDefines.h"
-#import <Foundation/Foundation.h>
 
 @class SentryFrame;
+@class SentryInAppLogic;
 
 NS_ASSUME_NONNULL_BEGIN
 
 @interface SentryCrashStackEntryMapper : NSObject
+SENTRY_NO_INIT
 
-/** Maps the stackEntry of a SentryCrashStackCursor to SentryFrame.
- *
- * @param stackCursor An with SentryCrash initialized stackCursor. You can use for example
- * sentrycrashsc_initSelfThread.
- */
-+ (SentryFrame *)mapStackEntryWithCursor:(SentryCrashStackCursor)stackCursor;
+- (instancetype)initWithInAppLogic:(SentryInAppLogic *)inAppLogic;
 
-/** Determines with the imageName of a frame of a stacktrace wether it is related to the execution
- * of the relevant code in this stack trace.
+/**
+ * Maps the stackEntry of a SentryCrashStackCursor to SentryFrame.
+ * @param stackCursor An with @c SentryCrash initialized @c stackCursor. You can use for example
+ * @c sentrycrashsc_initSelfThread.
  */
-+ (BOOL)isInApp:(NSString *)imageName;
+- (SentryFrame *)mapStackEntryWithCursor:(SentryCrashStackCursor)stackCursor;
+
+/**
+ * Maps a @c SentryCrashStackEntry to @c SentryFrame.
+ * @param stackEntry A stack entry retrieved from a thread.
+ */
+- (SentryFrame *)sentryCrashStackEntryToSentryFrame:(SentryCrashStackEntry)stackEntry;
 
 @end
 

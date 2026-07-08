@@ -13,6 +13,10 @@
 #import "variables.h"
 #import "secrets.h"
 
+#ifdef SENTRY_API_URL
+@import Sentry;
+#endif
+
 @implementation MJAppDelegate
 
 - (BOOL) applicationShouldHandleReopen:(NSApplication*)theApplication hasVisibleWindows:(BOOL)hasVisibleWindows {
@@ -41,6 +45,17 @@
     self.startupEvent = event;
 }
 
+#ifndef NO_INTENTS
+- (id)application:(NSApplication *)application handlerForIntent:(INIntent *)intent  API_AVAILABLE(macos(11.0)){
+    NSLog(@"handlerForIntent: Checking for HSExecuteLuaIntent");
+    if ([intent isKindOfClass:[HSExecuteLuaIntent class]]) {
+        NSLog(@"handlerForIntent: Found HSExecuteLuaIntent, dispatching to HSExecuteLuaIntentHandler");
+        return ([[HSExecuteLuaIntentHandler alloc] init]);
+    }
+    return nil;
+}
+#endif
+
 - (BOOL)application:(NSApplication *)theApplication openFile:(NSString *)fileAndPath {
     NSString *typeOfFile = [[NSWorkspace sharedWorkspace] typeOfFile:fileAndPath error:nil];
 
@@ -60,7 +75,7 @@
 
         NSFileManager *fileManager = [NSFileManager defaultManager];
 
-        // Remove any pre-existing copy of the Spoon
+        // Remove any preexisting copy of the Spoon
         if ([fileManager fileExistsAtPath:dstSpoonFullPath]) {
             NSLog(@"Spoon already exists at %@, removing the old version", dstSpoonFullPath);
             upgrade = YES;
@@ -76,6 +91,7 @@
                 return YES;
             }
         }
+
 
         success = [[NSFileManager defaultManager] moveItemAtPath:fileAndPath toPath:dstSpoonFullPath error:&fileError];
         if (!success) {
@@ -106,8 +122,8 @@
         if (!self.openFileDelegate) {
             self.startupFile = fileAndPath;
         } else {
-            if ([self.openFileDelegate respondsToSelector:@selector(callbackWithURL:)]) {
-                [self.openFileDelegate callbackWithURL:fileAndPath];
+            if ([self.openFileDelegate respondsToSelector:@selector(callbackWithURL:senderPID:)]) {
+                [self.openFileDelegate callbackWithURL:fileAndPath senderPID:-1];
             }
         }
     } else {
@@ -118,6 +134,18 @@
     return YES;
 }
 
+- (BOOL)application:(NSApplication *)application
+    continueUserActivity:(NSUserActivity *)userActivity
+      restorationHandler:(nonnull void (^)(NSArray<id<NSUserActivityRestoring>> *_Nullable))restorationHandler
+{
+  //NSLog(@"Open URL in NSUserActivityTypeBrowsingWeb");
+  if ([userActivity.activityType isEqualToString:NSUserActivityTypeBrowsingWeb]) {
+    [[NSWorkspace sharedWorkspace] openURL:userActivity.webpageURL];
+    return YES;
+  }
+  return NO;
+}
+
 
 - (void)applicationDidFinishLaunching:(NSNotification *)aNotification {
     BOOL isTesting = NO;
@@ -126,13 +154,15 @@
     if (CGEventSourceKeyState(kCGEventSourceStateCombinedSessionState,0x3A) && CGEventSourceKeyState(kCGEventSourceStateCombinedSessionState,0x37)) {
 
         NSAlert *alert = [[NSAlert alloc] init];
-        [alert addButtonWithTitle:@"Continue"];
-        [alert addButtonWithTitle:@"Delete Preferences"];
+        NSButton *deleteButton = [alert addButtonWithTitle:@"Delete Preferences"];
+        deleteButton.hasDestructiveAction = YES;
+
+        [alert addButtonWithTitle:@"Cancel"];
         [alert setMessageText:@"Do you want to delete the preferences?"];
-        [alert setInformativeText:@"Deleting the preferences will reset all Hammerspoon settings (including everything that uses hs.settings) to their defaults."];
+        [alert setInformativeText:@"Deleting the preferences will reset all Hammerspoon settings (including everything that uses hs.settings) to their defaults. This does not remove anything in ~/.hammerspoon/"];
         [alert setAlertStyle:NSAlertStyleWarning];
 
-        if ([alert runModal] == NSAlertSecondButtonReturn) {
+        if ([alert runModal] == NSAlertFirstButtonReturn) {
 
             // Reset Preferences:
             NSDictionary * allObjects;
@@ -226,10 +256,12 @@
             return event;
         };
 
-        [SentrySDK startWithOptions:@{
-            @"dsn": @SENTRY_API_URL,
-            @"beforeSend": sentryWillUploadCrashReport,
-            @"release": [[[NSBundle mainBundle] infoDictionary] objectForKey:@"CFBundleShortVersionString"]
+        [SentrySDK startWithConfigureOptions:^(SentryOptions *options) {
+            options.dsn = @SENTRY_API_URL;
+            options.beforeSend = sentryWillUploadCrashReport;
+            options.releaseName = NSBundle.mainBundle.infoDictionary[@"CFBundleShortVersionString"];
+            options.enableAppHangTracking = NO;
+            options.debug = YES; // Enabled debug when first installing is always helpful
         }];
     }
 #endif
@@ -264,7 +296,7 @@
 
 // Dragging & Dropping of Text to Dock Item
 -(void) processDockIconDraggedText:(NSPasteboard *)pboard userData:(NSString *)userData error:(NSString **)error {
-    NSString *pboardString = [pboard stringForType:NSStringPboardType];
+    NSString *pboardString = [pboard stringForType:NSPasteboardTypeString];
     textDroppedToDockIcon(pboardString);
 }
 

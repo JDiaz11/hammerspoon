@@ -1,16 +1,20 @@
 #import <Foundation/Foundation.h>
 
-#import "SentryDefines.h"
-#import "SentryOptions.h"
-
 NS_ASSUME_NONNULL_BEGIN
+
+@class SentryOptions;
 
 @protocol SentryIntegrationProtocol <NSObject>
 
 /**
- * installs the integration and returns YES if successful.
+ * Installs the integration and returns YES if successful.
  */
-- (void)installWithOptions:(SentryOptions *)options;
+- (BOOL)installWithOptions:(SentryOptions *)options NS_SWIFT_NAME(install(with:));
+
+/**
+ * Uninstalls the integration.
+ */
+- (void)uninstall;
 
 @end
 

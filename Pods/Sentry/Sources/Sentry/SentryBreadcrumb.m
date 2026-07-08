@@ -1,8 +1,43 @@
 #import "SentryBreadcrumb.h"
-#import "NSDate+SentryExtras.h"
-#import "NSDictionary+SentrySanitize.h"
+#import "SentryBreadcrumb+Private.h"
+#import "SentryDateUtils.h"
+#import "SentryInternalDefines.h"
+#import "SentryLevelMapper.h"
+#import "SentryNSDictionarySanitize.h"
+#import "SentrySwift.h"
 
 @implementation SentryBreadcrumb
+
+- (instancetype)initWithDictionary:(NSDictionary *)dictionary
+{
+    if (self = [super init]) {
+        for (id key in dictionary) {
+            id value = [dictionary valueForKey:key];
+            if (value == nil) {
+                continue;
+            }
+            BOOL isString = [value isKindOfClass:[NSString class]];
+            BOOL isDictionary = [value isKindOfClass:[NSDictionary class]];
+
+            if ([key isEqualToString:@"level"] && isString) {
+                self.level = sentryLevelForString(value);
+            } else if ([key isEqualToString:@"timestamp"] && isString) {
+                self.timestamp = sentry_fromIso8601String(value);
+            } else if ([key isEqualToString:@"category"] && isString) {
+                self.category = value;
+            } else if ([key isEqualToString:@"type"] && isString) {
+                self.type = value;
+            } else if ([key isEqualToString:@"origin"] && isString) {
+                self.origin = value;
+            } else if ([key isEqualToString:@"message"] && isString) {
+                self.message = value;
+            } else if ([key isEqualToString:@"data"] && isDictionary) {
+                self.data = value;
+            }
+        }
+    }
+    return self;
+}
 
 - (instancetype)initWithLevel:(enum SentryLevel)level category:(NSString *)category
 {
@@ -24,13 +59,17 @@
 {
     NSMutableDictionary *serializedData = [NSMutableDictionary new];
 
-    [serializedData setValue:SentryLevelNames[self.level] forKey:@"level"];
-    [serializedData setValue:[self.timestamp sentry_toIso8601String] forKey:@"timestamp"];
+    [serializedData setValue:nameForSentryLevel(self.level) forKey:@"level"];
+    if (self.timestamp != nil) {
+        [serializedData
+            setValue:sentry_toIso8601String(SENTRY_UNWRAP_NULLABLE(NSDate, self.timestamp))
+              forKey:@"timestamp"];
+    }
     [serializedData setValue:self.category forKey:@"category"];
     [serializedData setValue:self.type forKey:@"type"];
+    [serializedData setValue:self.origin forKey:@"origin"];
     [serializedData setValue:self.message forKey:@"message"];
-    [serializedData setValue:[self.data sentry_sanitize] forKey:@"data"];
-
+    [serializedData setValue:sentry_sanitize(self.data) forKey:@"data"];
     return serializedData;
 }
 
@@ -41,7 +80,7 @@
     if (!other || ![[other class] isEqual:[self class]])
         return NO;
 
-    return [self isEqualToBreadcrumb:other];
+    return [self isEqualToBreadcrumb:SENTRY_UNWRAP_NULLABLE(SentryBreadcrumb, other)];
 }
 
 - (BOOL)isEqualToBreadcrumb:(SentryBreadcrumb *)breadcrumb
@@ -56,13 +95,19 @@
         && ![self.category isEqualToString:breadcrumb.category])
         return NO;
     if (self.timestamp != breadcrumb.timestamp
-        && ![self.timestamp isEqualToDate:breadcrumb.timestamp])
+        && ![self.timestamp isEqualToDate:SENTRY_UNWRAP_NULLABLE(NSDate, breadcrumb.timestamp)])
         return NO;
-    if (self.type != breadcrumb.type && ![self.type isEqualToString:breadcrumb.type])
+    if (self.type != breadcrumb.type
+        && ![self.type isEqualToString:SENTRY_UNWRAP_NULLABLE(NSString, breadcrumb.type)])
         return NO;
-    if (self.message != breadcrumb.message && ![self.message isEqualToString:breadcrumb.message])
+    if (self.origin != breadcrumb.origin
+        && ![self.origin isEqualToString:SENTRY_UNWRAP_NULLABLE(NSString, breadcrumb.origin)])
         return NO;
-    if (self.data != breadcrumb.data && ![self.data isEqualToDictionary:breadcrumb.data])
+    if (self.message != breadcrumb.message
+        && ![self.message isEqualToString:SENTRY_UNWRAP_NULLABLE(NSString, breadcrumb.message)])
+        return NO;
+    if (self.data != breadcrumb.data
+        && ![self.data isEqualToDictionary:SENTRY_UNWRAP_NULLABLE(NSDictionary, breadcrumb.data)])
         return NO;
     return YES;
 }
@@ -74,9 +119,15 @@
     hash = hash * 23 + [self.category hash];
     hash = hash * 23 + [self.timestamp hash];
     hash = hash * 23 + [self.type hash];
+    hash = hash * 23 + [self.origin hash];
     hash = hash * 23 + [self.message hash];
     hash = hash * 23 + [self.data hash];
     return hash;
+}
+
+- (NSString *)description
+{
+    return [NSString stringWithFormat:@"<%@: %p, %@>", [self class], self, [self serialize]];
 }
 
 @end

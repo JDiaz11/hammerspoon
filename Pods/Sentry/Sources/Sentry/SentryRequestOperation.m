@@ -2,13 +2,15 @@
 #import "SentryClient.h"
 #import "SentryError.h"
 #import "SentryHub.h"
-#import "SentryLog.h"
-#import "SentrySDK.h"
+#import "SentryInternalDefines.h"
+#import "SentryLogC.h"
+#import "SentryOptions.h"
+#import "SentrySDK+Private.h"
+#import "SentrySwift.h"
 
 NS_ASSUME_NONNULL_BEGIN
 
-@interface
-SentryRequestOperation ()
+@interface SentryRequestOperation ()
 
 @property (nonatomic, strong) NSURLSessionTask *task;
 @property (nonatomic, strong) NSURLRequest *request;
@@ -32,21 +34,17 @@ SentryRequestOperation ()
                   NSInteger statusCode = [httpResponse statusCode];
 
                   // We only have these if's here because of performance reasons
-                  [SentryLog logWithMessage:[NSString stringWithFormat:@"Request status: %ld",
-                                                      (long)statusCode]
-                                   andLevel:kSentryLogLevelDebug];
-                  if ([SentrySDK.currentHub getClient].options.logLevel == kSentryLogLevelVerbose) {
-                      [SentryLog logWithMessage:[NSString stringWithFormat:@"Request response: %@",
-                                                          [[NSString alloc]
-                                                              initWithData:data
-                                                                  encoding:NSUTF8StringEncoding]]
-                                       andLevel:kSentryLogLevelVerbose];
+                  SENTRY_LOG_DEBUG(@"Request status: %ld", (long)statusCode);
+                  if ([SentrySDKInternal.currentHub getClient].options.debug == YES) {
+                      SENTRY_LOG_DEBUG(@"Request response: %@",
+                          data != nil
+                              ? [[NSString alloc] initWithData:SENTRY_UNWRAP_NULLABLE(NSData, data)
+                                                      encoding:NSUTF8StringEncoding]
+                              : @"<no data>");
                   }
 
                   if (nil != error) {
-                      [SentryLog
-                          logWithMessage:[NSString stringWithFormat:@"Request failed: %@", error]
-                                andLevel:kSentryLogLevelError];
+                      SENTRY_LOG_ERROR(@"Request failed: %@", error);
                   }
 
                   if (completionHandler) {

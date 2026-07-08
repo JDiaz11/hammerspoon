@@ -24,6 +24,7 @@ extensions/httpserver/HammerspoonCertTemplate.h
 
 ## Build generated
 build/
+artifacts/
 DerivedData/
 
 ## Various settings
@@ -42,3 +43,4 @@ xcuserdata/
 *.xccheckout
 *.xcscmblueprint
 
+Brewfile.lock.json

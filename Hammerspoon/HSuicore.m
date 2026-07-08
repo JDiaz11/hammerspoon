@@ -35,12 +35,16 @@
 }
 
 +(NSString *)pathForBundleID:(NSString *)bundleID {
-    return [[NSWorkspace sharedWorkspace] absolutePathForAppBundleWithIdentifier:bundleID];
+    NSString *path = @"";
+    NSURL *url = [[NSWorkspace sharedWorkspace] URLForApplicationWithBundleIdentifier:bundleID];
+    if (url) {
+        path = url.path;
+    }
+    return path;
 }
 
 +(NSDictionary *)infoForBundleID:(NSString *)bundleID {
-    NSWorkspace *ws = [NSWorkspace sharedWorkspace];
-    NSString *appPath = [ws absolutePathForAppBundleWithIdentifier:bundleID];
+    NSString *appPath = [HSapplication pathForBundleID:bundleID];
     return [HSapplication infoForBundlePath:appPath];
 }
 
@@ -52,6 +56,36 @@
         appInfo = app.infoDictionary;
     }
     return appInfo;
+}
+
++(NSArray *)preferredLocalizationsForBundleID:(NSString *)bundleID {
+    NSString *appPath = [HSapplication pathForBundleID:bundleID];
+    return [HSapplication preferredLocalizationsForBundlePath:appPath];
+}
+
++(NSArray *)preferredLocalizationsForBundlePath:(NSString *)bundlePath {
+    NSArray *preferredLocalizations = nil;
+
+    NSBundle *app = [NSBundle bundleWithPath:bundlePath];
+    if (app) {
+        preferredLocalizations = app.preferredLocalizations;
+    }
+    return preferredLocalizations;
+}
+
++(NSArray *)localizationsForBundleID:(NSString *)bundleID {
+    NSString *appPath = [HSapplication pathForBundleID:bundleID];
+    return [HSapplication localizationsForBundlePath:appPath];
+}
+
++(NSArray *)localizationsForBundlePath:(NSString *)bundlePath {
+    NSArray *localizations = nil;
+
+    NSBundle *app = [NSBundle bundleWithPath:bundlePath];
+    if (app) {
+        localizations = app.localizations;
+    }
+    return localizations;
 }
 
 +(NSArray<HSapplication *>*)runningApplicationsWithState:(lua_State *)L {
@@ -241,7 +275,7 @@
 //         [LuaSkin logError:[NSString stringWithFormat:@"Unable to fetch element attribute NSAccessibilityFrontmostAttribute for: %@", [self.runningApp localizedName]]];
     }
 
-    [LuaSkin logBreadcrumb:[NSString stringWithFormat:@"FRONTMOST: %@:%@:%@", self.title, isFrontmost, AXIsProcessTrusted() ? @"YES" : @"NO"]];
+    //[LuaSkin logBreadcrumb:[NSString stringWithFormat:@"FRONTMOST: %@:%@:%@", self.title, isFrontmost, AXIsProcessTrusted() ? @"YES" : @"NO"]];
 
     return isFrontmost.boolValue;
 }
@@ -333,6 +367,7 @@
     HSuielementWatcher *watcher = [[HSuielementWatcher alloc] initWithElement:self
                                                                   callbackRef:(int)callbackRef
                                                                   userdataRef:(int)userDataRef];
+    watcher.lsCanary = [skin createGCCanary];
     return watcher;
 }
 
@@ -378,10 +413,11 @@
 
 static void watcher_observer_callback(AXObserverRef observer __unused, AXUIElementRef element,
                                       CFStringRef notificationName, void* contextData) {
+    HSuielementWatcher *watcher = (__bridge HSuielementWatcher *)contextData;
     LuaSkin *skin = [LuaSkin sharedWithState:NULL];
+    [skin checkGCCanary:watcher.lsCanary];
     _lua_stackguard_entry(skin.L);
 
-    HSuielementWatcher *watcher = (__bridge HSuielementWatcher *)contextData;
 
     [skin pushLuaRef:watcher.refTable ref:watcher.handlerRef]; // Callback function
 
@@ -557,12 +593,15 @@ cleanup:
     CFArrayRef wins = CGWindowListCreate(kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements, kCGNullWindowID);
 
     if (wins) {
+        CFArrayRef windowDescs = CGWindowListCreateDescriptionFromArray(wins);
         windowIDs = [[NSMutableArray alloc] initWithCapacity:CFArrayGetCount(wins)];
-        for (int i = 0; i < CFArrayGetCount(wins); i++) {
-            int winid = (int)CFArrayGetValueAtIndex(wins, i);
-            [windowIDs addObject:[NSNumber numberWithInt:winid]];
+        for (CFIndex i = 0; i < CFArrayGetCount(wins); i++) {
+            CFDictionaryRef dict = CFArrayGetValueAtIndex(windowDescs, i);
+            CFNumberRef winid = CFDictionaryGetValue(dict, kCGWindowNumber);
+            [windowIDs addObject:(__bridge NSNumber *)winid];
         }
         CFRelease(wins);
+        CFRelease(windowDescs);
     } else {
         [LuaSkin logBreadcrumb:@"hs.window._orderedwinids CGWindowListCreate returned NULL"] ;
     }
@@ -573,11 +612,8 @@ cleanup:
     NSImage *image = nil;
     CGWindowImageOption makeOpaque = keepTransparency ? kCGWindowImageDefault : kCGWindowImageShouldBeOpaque;
     CGRect windowRect = CGRectNull;
-    CFArrayRef targetWindow = CFArrayCreate(NULL, (const void **)(&windowID), 1, NULL);
-    CGImageRef windowImage = CGWindowListCreateImageFromArray(windowRect,
-                                                              targetWindow,
-                                                              kCGWindowImageBoundsIgnoreFraming | makeOpaque);
-    CFRelease(targetWindow);
+    CGImageRef windowImage = CGWindowListCreateImage(windowRect, kCGWindowListOptionIncludingWindow, windowID, kCGWindowImageBoundsIgnoreFraming | makeOpaque);
+
     if (windowImage) {
         image = [[NSImage alloc] initWithCGImage:windowImage size:windowRect.size];
         CFRelease(windowImage);
@@ -706,6 +742,41 @@ cleanup:
     AXUIElementSetAttributeValue(self.elementRef, (CFStringRef)NSAccessibilitySizeAttribute, sizeStorage);
     if (sizeStorage) {
         CFRelease(sizeStorage);
+    }
+}
+
+-(void)setFrame:(NSRect)frame {
+    // Disable Enhanced UI during operation for better reliability
+    AXUIElementRef appElement = AXUIElementCreateApplication(self.pid);
+    CFBooleanRef enhancedUI = NULL;
+    BOOL hadEnhancedUI = NO;
+
+    if (appElement) {
+        if (AXUIElementCopyAttributeValue(appElement, CFSTR("AXEnhancedUserInterface"), (CFTypeRef *)&enhancedUI) == kAXErrorSuccess) {
+            if (enhancedUI) {
+                hadEnhancedUI = CFBooleanGetValue(enhancedUI);
+                CFRelease(enhancedUI);
+
+                if (hadEnhancedUI) {
+                    AXUIElementSetAttributeValue(appElement, CFSTR("AXEnhancedUserInterface"), kCFBooleanFalse);
+                }
+            }
+        }
+    }
+
+    // Step 1: Set size first (prepares for potential cross-display move)
+    [self setSize:frame.size];
+    // Step 2: Set position (may move window to different display)
+    [self setTopLeft:frame.origin];
+    // Step 3: Set size again (ensures correct size on target display)
+    [self setSize:frame.size];
+
+    if (appElement && hadEnhancedUI) {
+        AXUIElementSetAttributeValue(appElement, CFSTR("AXEnhancedUserInterface"), kCFBooleanTrue);
+    }
+
+    if (appElement) {
+        CFRelease(appElement);
     }
 }
 

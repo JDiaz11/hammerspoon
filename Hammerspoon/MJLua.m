@@ -22,6 +22,9 @@
 #import <AppKit/AppKit.h>
 #import <libproc.h>
 #import <dlfcn.h>
+#import <sys/utsname.h>
+#import <sys/types.h>
+#import <sys/sysctl.h>
 
 @interface MJPreferencesWindowController ()
 - (void) reflectDefaults ;
@@ -34,7 +37,7 @@ static int completionsForWordFn;
 
 static lua_CFunction oldPanicFunction ;
 
-static int refTable;
+static LSRefTable refTable;
 
 static void(^loghandler)(NSString* str);
 void MJLuaSetupLogHandler(void(^blk)(NSString* str)) {
@@ -114,6 +117,12 @@ static int core_consoleontop(lua_State* L) {
 /// hs.openAbout()
 /// Function
 /// Displays the OS X About panel for Hammerspoon; implicitly focuses Hammerspoon.
+///
+/// Parameters:
+///  * None
+///
+/// Returns:
+///  * None
 static int core_openabout(lua_State* __unused L) {
     [[NSApplication sharedApplication] activateIgnoringOtherApps:YES];
     [[NSApplication sharedApplication] orderFrontStandardAboutPanel:nil];
@@ -123,6 +132,12 @@ static int core_openabout(lua_State* __unused L) {
 /// hs.openPreferences()
 /// Function
 /// Displays the Hammerspoon Preferences panel; implicitly focuses Hammerspoon.
+///
+/// Parameters:
+///  * None
+///
+/// Returns:
+///  * None
 static int core_openpreferences(lua_State* __unused L) {
     [[NSApplication sharedApplication] activateIgnoringOtherApps:YES];
     [[MJPreferencesWindowController singleton] showWindow: nil];
@@ -134,7 +149,7 @@ static int core_openpreferences(lua_State* __unused L) {
 /// Function
 /// Closes the Hammerspoon Preferences window
 ///
-/// Paramters:
+/// Parameters:
 ///  * None
 ///
 /// Returns:
@@ -187,7 +202,8 @@ static int core_open(lua_State *L) {
     LuaSkin *skin = [LuaSkin sharedWithState:L];
     [skin checkArgs:LS_TSTRING, LS_TBREAK];
 
-    BOOL result = [[NSWorkspace sharedWorkspace] openFile:[skin toNSObjectAtIndex:1]];
+    NSURL *pathURL = [NSURL fileURLWithPath:[skin toNSObjectAtIndex:1]];
+    BOOL result = [NSWorkspace.sharedWorkspace openURL:pathURL];
 
     lua_pushboolean(L, result);
     return 1;
@@ -196,6 +212,12 @@ static int core_open(lua_State *L) {
 /// hs.reload()
 /// Function
 /// Reloads your init-file in a fresh Lua environment.
+///
+/// Parameters:
+///  * None
+///
+/// Returns:
+///  * None
 static int core_reload(lua_State* L) {
     dispatch_async(dispatch_get_main_queue(), ^{
         MJLuaReplace();
@@ -208,14 +230,35 @@ static int core_reload(lua_State* L) {
 /// A table containing read-only information about the Hammerspoon application instance currently running.
 static int push_hammerAppInfo(lua_State* L) {
     LuaSkin *skin = [LuaSkin sharedWithState:L];
+
+    // Fetch the CPU architecture in use
+    NSString *arch = @"Unknown";
+    struct utsname utsname;
+    if (uname(&utsname) == 0) {
+        arch = [NSString stringWithCString:utsname.machine encoding:NSUTF8StringEncoding];
+    }
+
+    // Determine if we're running under Rosetta
+    int isTranslated = 0;
+    size_t size = sizeof(isTranslated);
+    if (sysctlbyname("sysctl.proc_translated", &isTranslated, &size, NULL, 0) == -1) {
+        if (errno == ENOENT)
+            isTranslated = 0;
+        // Technically to reach here we have an error in the sysctl, but we'll ignore it
+        // isTranslated = -1;
+    }
+
     NSDictionary *appInfo = @{
                               @"version": [[[NSBundle mainBundle] infoDictionary] objectForKey:@"CFBundleShortVersionString"],
                               @"build": [[[NSBundle mainBundle] infoDictionary] objectForKey:@"CFBundleVersion"],
                               @"resourcePath": @([[[NSBundle mainBundle] resourcePath] fileSystemRepresentation]),
                               @"bundlePath": @([[[NSBundle mainBundle] bundlePath] fileSystemRepresentation]),
                               @"executablePath": @([[[NSBundle mainBundle] executablePath] fileSystemRepresentation]),
+                              @"frameworksPath": @([[[NSBundle mainBundle] privateFrameworksPath] fileSystemRepresentation]),
                               @"processID": @(getpid()),
                               @"bundleID": [[NSBundle mainBundle] bundleIdentifier],
+                              @"arch": arch,
+                              @"isRosetta": [NSNumber numberWithBool:isTranslated],
                               @"buildTime": @(__DATE__ ", " __TIME__),
 #ifdef DEBUG
                               @"debugBuild": @(YES),
@@ -251,34 +294,51 @@ static int core_accessibilityState(lua_State* L) {
     return 1;
 }
 
-// SOURCE: https://stackoverflow.com/a/58786245/6925202
-bool isScreenRecordingEnabled()
+// SOURCE: https://stackoverflow.com/a/58985069
+bool isScreenRecordingEnabled(void)
 {
     if (@available(macos 10.15, *)) {
-        bool bRet = false;
-        CFArrayRef list = CGWindowListCopyWindowInfo(kCGWindowListOptionAll, kCGNullWindowID);
-        if (list) {
-            int n = (int)(CFArrayGetCount(list));
-            for (int i = 0; i < n; i++) {
-                NSDictionary* info = (NSDictionary*)(CFArrayGetValueAtIndex(list, (CFIndex)i));
-                NSString* name = info[(id)kCGWindowName];
-                NSNumber* pid = info[(id)kCGWindowOwnerPID];
-                if (pid != nil && name != nil) {
-                    int nPid = [pid intValue];
-                    char path[PROC_PIDPATHINFO_MAXSIZE+1];
-                    int lenPath = proc_pidpath(nPid, path, PROC_PIDPATHINFO_MAXSIZE);
-                    if (lenPath > 0) {
-                        path[lenPath] = 0;
-                        if (strcmp(path, "/System/Library/CoreServices/SystemUIServer.app/Contents/MacOS/SystemUIServer") == 0) {
-                            bRet = true;
-                            break;
+        BOOL canRecordScreen = YES;
+        if (@available(macOS 10.15, *)) {
+            canRecordScreen = NO;
+            NSRunningApplication *runningApplication = NSRunningApplication.currentApplication;
+            NSNumber *ourProcessIdentifier = [NSNumber numberWithInteger:runningApplication.processIdentifier];
+
+            CFArrayRef windowList = CGWindowListCopyWindowInfo(kCGWindowListOptionOnScreenOnly, kCGNullWindowID);
+            NSUInteger numberOfWindows = CFArrayGetCount(windowList);
+            for (int index = 0; index < numberOfWindows; index++) {
+                // get information for each window
+                NSDictionary *windowInfo = (NSDictionary *)CFArrayGetValueAtIndex(windowList, index);
+                NSString *windowName = windowInfo[(id)kCGWindowName];
+                NSNumber *processIdentifier = windowInfo[(id)kCGWindowOwnerPID];
+
+                // don't check windows owned by this process
+                if (! [processIdentifier isEqual:ourProcessIdentifier]) {
+                    // get process information for each window
+                    pid_t pid = processIdentifier.intValue;
+                    NSRunningApplication *windowRunningApplication = [NSRunningApplication runningApplicationWithProcessIdentifier:pid];
+                    if (! windowRunningApplication) {
+                        // ignore processes we don't have access to, such as WindowServer, which manages the windows named "Menubar" and "Backstop Menubar"
+                    }
+                    else {
+                        NSString *windowExecutableName = windowRunningApplication.executableURL.lastPathComponent;
+                        if (windowName) {
+                            if ([windowExecutableName isEqual:@"Dock"]) {
+                                // ignore the Dock, which provides the desktop picture
+                            }
+                            else {
+                                canRecordScreen = YES;
+                                break;
+                            }
                         }
                     }
                 }
             }
-            CFRelease(list);
+            if (windowList) {
+                CFRelease(windowList);
+            }
         }
-        return bRet;
+        return canRecordScreen;
     } else {
         return true;
     }
@@ -374,7 +434,7 @@ static int core_microphoneState(lua_State* L) {
 /// Checks the Camera Permissions for Hammerspoon, and optionally allows you to prompt for permissions.
 ///
 /// Parameters:
-///  * shouldPrompt - an optional boolean value indicating if we should request camear access. Defaults to false.
+///  * shouldPrompt - an optional boolean value indicating if we should request camera access. Defaults to false.
 ///
 /// Returns:
 ///  * `true` or `false` indicating whether or not Camera access is enabled for Hammerspoon.
@@ -463,10 +523,18 @@ static int automaticallyChecksForUpdates(lua_State *L) {
             // for any method which accepts the same signature list for the target.
                 [myInvocation setSelector:@selector(setAutomaticallyChecksForUpdates:)];
                 [myInvocation setArgument:&myBoolValue atIndex:2];
+                //[myInvocation setReturnValue:&myBoolValue];
                 [myInvocation invoke];
 
             }
-            lua_pushboolean(L, (BOOL)[sharedUpdater performSelector:@selector(automaticallyChecksForUpdates)]) ;
+            BOOL autoCheckUpdates = NO;
+            NSMethodSignature *autoCheckSignature = [NSClassFromString(@"SUUpdater") instanceMethodSignatureForSelector:@selector(automaticallyChecksForUpdates)];
+            NSInvocation *autoCheckInvocation = [NSInvocation invocationWithMethodSignature:autoCheckSignature];
+            [autoCheckInvocation setTarget:sharedUpdater];
+            [autoCheckInvocation setSelector:@selector(automaticallyChecksForUpdates)];
+            [autoCheckInvocation invoke];
+            [autoCheckInvocation getReturnValue:&autoCheckUpdates];
+            lua_pushboolean(L, autoCheckUpdates) ;
 #pragma clang diagnostic pop
         } else {
             [skin logWarn:@"Sparkle Update framework not available for the running instance of Hammerspoon."] ;
@@ -620,10 +688,9 @@ static int preferencesDarkMode(lua_State* L) {
 ///      - Open `/Applications/Utilities/Script Editor.app`
 ///      - Click `File > Open Dictionary...`
 ///      - Select Hammerspoon from the list of Applications
-///      - This will now open a Dictionary containing all of the availible Hammerspoon AppleScript commands.
+///      - This will now open a Dictionary containing all of the available Hammerspoon AppleScript commands.
 ///  * Note that strings within the Lua code you pass from AppleScript can be delimited by `[[` and `]]` rather than normal quotes
 ///  * Example:
-///
 ///    ```lua
 ///    tell application "Hammerspoon"
 ///      execute lua code "hs.alert([[Hello from AppleScript]])"
@@ -667,6 +734,12 @@ static int core_openConsoleOnDockClick(lua_State* L) {
 /// hs.focus()
 /// Function
 /// Makes Hammerspoon the foreground app.
+///
+/// Parameters:
+///  * None
+///
+/// Returns:
+///  * None
 static int core_focus(lua_State* L) {
     [[NSApplication sharedApplication] activateIgnoringOtherApps:YES];
     return 0;
@@ -807,7 +880,9 @@ static int MJLuaAtPanic(lua_State *L) {
 
 // Create a Lua environment with LuaSkin
 void MJLuaAlloc(void) {
-    MJLuaLogDelegate = [[HSLogger alloc] initWithLua:nil];
+    if (!MJLuaLogDelegate) {
+        MJLuaLogDelegate = [[HSLogger alloc] initWithLua:nil];
+    }
     LuaSkin *skin = [LuaSkin sharedWithDelegate:MJLuaLogDelegate];
     // on a reload, this won't get created in sharedWithDelegate:, so do it manually here
     if (!LuaSkin.mainLuaState) {
@@ -826,7 +901,7 @@ void MJLuaInit(void) {
     LuaSkin *skin = [LuaSkin sharedWithState:NULL] ;
     lua_State* L = skin.L;
 
-    refTable = [skin registerLibrary:corelib metaFunctions:nil];
+    refTable = [skin registerLibrary:"core" functions:corelib metaFunctions:nil];
     push_hammerAppInfo(L) ;
     lua_setfield(L, -2, "processInfo") ;
 
@@ -845,6 +920,7 @@ void MJLuaInit(void) {
     }
 
     lua_pushstring(L, [[[NSBundle mainBundle] pathForResource:@"extensions" ofType:nil] fileSystemRepresentation]);
+    lua_pushstring(L, [[NSBundle mainBundle].privateFrameworksPath fileSystemRepresentation]);
     lua_pushstring(L, [MJConfigFile UTF8String]);
     lua_pushstring(L, [MJConfigFileFullPath() UTF8String]);
     lua_pushstring(L, [MJConfigDir() UTF8String]);
@@ -852,7 +928,7 @@ void MJLuaInit(void) {
     lua_pushboolean(L, [[NSFileManager defaultManager] fileExistsAtPath: MJConfigFileFullPath()]);
     lua_pushboolean(L, [[NSUserDefaults standardUserDefaults] boolForKey:HSAutoLoadExtensions]);
 
-    if (lua_pcall(L, 7, 2, 0) != LUA_OK) {
+    if (lua_pcall(L, 8, 2, 0) != LUA_OK) {
         NSString *errorMessage = [NSString stringWithFormat:@"%s", lua_tostring(L, -1)] ;
         lua_pop(L, 1); // Pop the error message off the stack
         HSNSLOG(@"Error running setup.lua:%@", errorMessage);
@@ -863,8 +939,24 @@ void MJLuaInit(void) {
         [alert setAlertStyle:NSAlertStyleCritical];
         [alert runModal];
     } else {
+        if (lua_gettop(L) != 2 || lua_type(L, -1) != LUA_TFUNCTION || lua_type(L, -2) != LUA_TFUNCTION) {
+            NSString *debugPart = [NSString stringWithFormat:@"setup.lua returned this: %d:%d:%d", lua_gettop(L), (lua_gettop(L) >= 1) ? lua_type(L, -1) : -10, (lua_gettop(L) >= 2) ? lua_type(L, -2) : -10];
+
+            NSString *errorMessage = [NSString stringWithFormat:@"setup.lua failed to return the two items it is supposed to.\nThis is a severe bug. We would really appreciate your help in getting this fixed - please relaunch Hammerspoon so a crash report can be uploaded, then contact the Hammerspoon developers via GitHub."];
+            NSAlert *alert = [[NSAlert alloc] init];
+            [alert addButtonWithTitle:@"OK"];
+            [alert setMessageText:@"Critical startup failure bug"];
+            [alert setInformativeText:errorMessage];
+            [alert setAlertStyle:NSAlertStyleCritical];
+            [alert runModal];
+
+            [skin logBreadcrumb:[NSString stringWithFormat:@"setup.lua returned incorrectly: %@", debugPart]];
+
+            // Fall through this, so we crash, so we can get the crash report
+        }
         evalfn = [skin luaRef:refTable];
         completionsForWordFn = [skin luaRef:refTable];
+        [skin logBreadcrumb:@"setup.lua completed"];
     }
 }
 
@@ -987,10 +1079,7 @@ void MJLuaDeinit(void) {
 
     callShutdownCallback(skin.L);
 
-    if (MJLuaLogDelegate) {
-        [skin setDelegate:nil] ;
-        MJLuaLogDelegate = nil ;
-    }
+    [MJLuaLogDelegate setLuaState:nil];
 }
 
 // Destroy a Lua environment with LuaSiin
@@ -1022,19 +1111,10 @@ NSString* MJLuaRunString(NSString* command) {
     }
 
     size_t len;
-    const char* s = lua_tolstring(L, -1, &len);
+    const unsigned char* s = (const unsigned char *)lua_tolstring(L, -1, &len);
     NSString* str = [[NSString alloc] initWithData:[NSData dataWithBytes:s length:len] encoding:NSUTF8StringEncoding];
     if (str == nil) {
-      lua_pushcfunction(L, core_cleanUTF8) ;
-      lua_pushvalue(L, -2) ;
-      if (lua_pcall(L, 1, 1, 0) == LUA_OK) {
-          s = lua_tolstring(L, -1, &len);
-          str = [[NSString alloc] initWithData:[NSData dataWithBytes:s length:len] encoding:NSUTF8StringEncoding];
-          lua_pop(L, 1) ;
-      } else {
-          str = [[NSString alloc] initWithFormat:@"-- unable to clean for utf8 output: %s", lua_tostring(L, -1)] ;
-          lua_pop(L, 1) ;
-      }
+        str = [skin getValidUTF8:s ofLength:len];
     }
     lua_pop(L, 1);
 
@@ -1062,7 +1142,7 @@ NSArray *MJLuaCompletionsForWord(NSString *completionWord) {
 
 // C-Code helper to return current active LuaState. Useful for callbacks to
 // verify stored LuaState still matches active one if GC fails to clear it.
-lua_State* MJGetActiveLuaState() {
+lua_State* MJGetActiveLuaState(void) {
     LuaSkin *skin = [LuaSkin sharedWithState:NULL];
   return skin.L ;
 }

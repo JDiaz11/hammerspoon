@@ -1,5 +1,6 @@
 #import "SentryException.h"
 #import "SentryMechanism.h"
+#import "SentryModels+Serializable.h"
 #import "SentryStacktrace.h"
 #import "SentryThread.h"
 
@@ -25,8 +26,8 @@ NS_ASSUME_NONNULL_BEGIN
     [serializedData setValue:self.type forKey:@"type"];
     [serializedData setValue:[self.mechanism serialize] forKey:@"mechanism"];
     [serializedData setValue:self.module forKey:@"module"];
-    [serializedData setValue:self.thread.threadId forKey:@"thread_id"];
-    [serializedData setValue:[self.thread.stacktrace serialize] forKey:@"stacktrace"];
+    [serializedData setValue:self.threadId forKey:@"thread_id"];
+    [serializedData setValue:[self.stacktrace serialize] forKey:@"stacktrace"];
 
     return serializedData;
 }

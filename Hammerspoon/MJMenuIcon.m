@@ -27,8 +27,7 @@ static void reflect_defaults(void) {
         [icon setTemplate:YES];
         
         statusItem = [[NSStatusBar systemStatusBar] statusItemWithLength:NSSquareStatusItemLength];
-        [statusItem setImage:icon];
-        [statusItem setHighlightMode:YES];
+        statusItem.button.image = icon;
         [statusItem setMenu: menuItemMenu];
     }
     else {

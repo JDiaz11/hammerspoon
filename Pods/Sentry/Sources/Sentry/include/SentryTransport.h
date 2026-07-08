@@ -1,33 +1,34 @@
-#import <Foundation/Foundation.h>
+#import "SentryDataCategory.h"
+#import "SentryDiscardReason.h"
 
-@class SentryEnvelope, SentryEvent, SentrySession, SentryUserFeedback;
+@class SentryEnvelope;
 
 NS_ASSUME_NONNULL_BEGIN
 
-// TODO: align with unified SDK api
-/**
- * Sends data to the Sentry server.
- */
+typedef NS_ENUM(NSInteger, SentryFlushResult) {
+    kSentryFlushResultSuccess = 0,
+    kSentryFlushResultTimedOut,
+    kSentryFlushResultAlreadyFlushing,
+};
+
 NS_SWIFT_NAME(Transport)
 @protocol SentryTransport <NSObject>
 
-/**
- * Sends an event to sentry.
- * Triggerd when a event occurs. Thus the first try to upload an event.
- * CompletionHandler will be called if set.
- *
- * Failure to send will most likely keep this event on disk to batch upload it
- * on next app launch.
- *
- * @param event SentryEvent that should be sent
- */
-- (void)sendEvent:(SentryEvent *)event NS_SWIFT_NAME(send(event:));
-
-- (void)sendEvent:(SentryEvent *)event withSession:(SentrySession *)session;
-
-- (void)sendUserFeedback:(SentryUserFeedback *)userFeedback NS_SWIFT_NAME(send(userFeedback:));
-
 - (void)sendEnvelope:(SentryEnvelope *)envelope NS_SWIFT_NAME(send(envelope:));
+
+- (void)storeEnvelope:(SentryEnvelope *)envelope;
+
+- (void)recordLostEvent:(SentryDataCategory)category reason:(SentryDiscardReason)reason;
+
+- (void)recordLostEvent:(SentryDataCategory)category
+                 reason:(SentryDiscardReason)reason
+               quantity:(NSUInteger)quantity;
+
+- (SentryFlushResult)flush:(NSTimeInterval)timeout;
+
+#if defined(SENTRY_TEST) || defined(SENTRY_TEST_CI) || defined(DEBUG)
+- (void)setStartFlushCallback:(void (^)(void))callback;
+#endif // defined(SENTRY_TEST) || defined(SENTRY_TEST_CI) || defined(DEBUG)
 
 @end
 

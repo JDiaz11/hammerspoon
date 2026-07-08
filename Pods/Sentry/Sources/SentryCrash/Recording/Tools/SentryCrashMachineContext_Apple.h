@@ -1,3 +1,4 @@
+// Adapted from: https://github.com/kstenerud/KSCrash
 //
 //  SentryCrashMachineContext_Apple.h
 //
@@ -33,6 +34,7 @@ extern "C" {
 
 #include <mach/mach_types.h>
 #include <stdbool.h>
+#include <stddef.h>
 #include <sys/ucontext.h>
 
 #ifdef __arm64__

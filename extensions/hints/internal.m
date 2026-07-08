@@ -63,7 +63,11 @@ static float hintIconAlpha = 0.95;
 }
 
 - (void)setIconFromBundleID:(NSString*)appBundle {
-    NSString *path = [[NSWorkspace sharedWorkspace] absolutePathForAppBundleWithIdentifier:appBundle];
+    NSString *path = @"";
+    NSURL *url = [[NSWorkspace sharedWorkspace] URLForApplicationWithBundleIdentifier:appBundle];
+    if (url) {
+        path = url.path;
+    }
     NSImage *theIcon = [[NSWorkspace sharedWorkspace] iconForFile:path];
     [self setIcon:theIcon];
 }
@@ -223,7 +227,7 @@ static const luaL_Reg hints_metalib[] = {
     {NULL, NULL}
 };
 
-int luaopen_hs_hints_internal(lua_State* L) {
+int luaopen_hs_libhints(lua_State* L) {
     LuaSkin *skin = [LuaSkin sharedWithState:L];
     [skin registerLibraryWithObject:USERDATA_TAG functions:hintslib metaFunctions:nil objectFunctions:hints_metalib];
 

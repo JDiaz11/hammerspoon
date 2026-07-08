@@ -1,12 +1,13 @@
 #!/bin/bash
+# Build for testing
 
-set -e
+set -eu
 set -o pipefail
 
-make docs
-
+export IS_CI=1
 mkdir -p artifacts
 
-xcodebuild -workspace Hammerspoon.xcworkspace -scheme Release build-for-testing GCC_INSTRUMENT_PROGRAM_FLOW_ARCS=YES GCC_GENERATE_TEST_COVERAGE_FILES=YES | tee artifacts/build.log | xcpretty -f `xcpretty-actions-formatter`
+./scripts/build.sh build -s Release -d -e -x "Hammerspoon/Build Configs/Hammerspoon-Test.xcconfig" || true
 
-make build/html
+# Note that even though we're building with the Release scheme, the above build actually uses the Debug configuration, so the output log is Debug-build.log
+cp build/Debug-build.log artifacts/build.log

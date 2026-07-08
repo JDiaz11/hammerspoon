@@ -146,7 +146,7 @@ Your `:bindHotkeys()` method now has all of the information it needs to bind hot
 
 While you might want to verify the contents of the table, it seems reasonable to be fairly limited in the extent, so long as you have documented the method well.
 
-The function `hs.spoons.bindHotkeysToSpec()` can do most of the hard work of the mappings for you. For exmaple, the following would allow binding of actions `show` and `hide` to `showMethod()` and `hideMethod()` respectively:
+The function `hs.spoons.bindHotkeysToSpec()` can do most of the hard work of the mappings for you. For example, the following would allow binding of actions `show` and `hide` to `showMethod()` and `hideMethod()` respectively:
 
 ```lua
 function MySpoon:bindHotKeys(mapping)
@@ -176,7 +176,7 @@ Spoon methods/variables/etc. should be documented using the same docstring forma
 ---
 --- Parameters:
 ---  * vendorID - A number containing the vendor ID of a USB device
----  * productID - A number containing the vendor ID of a USB device
+---  * productID - A number containing the product ID of a USB device
 ---  * name - An optional string containing the name of a USB device
 ---
 --- Returns:
@@ -199,7 +199,7 @@ Any Spoons that are submitted to the official Spoons repository will have their 
 
 If you also want to generate HTML/Markdown versions of your documentation for your own purposes:
 
- * Clone [https://github.com/Hamerspoon/hammerspoon](https://github.com/Hammerspoon/hammerspoon)
+ * Clone [https://github.com/Hammerspoon/hammerspoon](https://github.com/Hammerspoon/hammerspoon)
  * Install the required Python dependencies (e.g. `pip install --user -r requirements.txt` in the Hammerspoon repo)
  * Then in your Spoon's directory, run:
 

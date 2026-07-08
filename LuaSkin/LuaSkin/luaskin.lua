@@ -5,7 +5,7 @@ local owMT = debug.getregistry()[USERDATA_TAG]
 
 -- private variables and methods -----------------------------------------
 
--- copied from `hs.fnutils` to keep this file independant of Hammerspoon
+-- copied from `hs.fnutils` to keep this file independent of Hammerspoon
 -- sorts a key-value table by the keys and returns an iterator function usable by the lua `for` command
 local _sortByKeys = function(t, f)
   -- a default, simple comparison that treats keys as strings only if their types differ
@@ -35,7 +35,7 @@ _kMetaTable._k = setmetatable({}, {__mode = "k"})
 _kMetaTable._t = setmetatable({}, {__mode = "k"})
 _kMetaTable.__index = function(obj, key)
         if _kMetaTable._k[obj] then
-            if _kMetaTable._k[obj][key] then
+            if type(_kMetaTable._k[obj][key]) ~= "nil" then
                 return _kMetaTable._k[obj][key]
             else
                 for k,v in pairs(_kMetaTable._k[obj]) do

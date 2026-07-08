@@ -27,6 +27,10 @@
 
 // Test functions/constructors
 
+- (void)testGetDefaultEffect {
+    RUN_LUA_TEST()
+}
+
 - (void)testGetDefaultOutput {
     RUN_LUA_TEST()
 }
@@ -102,6 +106,10 @@
     RUN_LUA_TEST()
 }
 
+- (void)testSetDefaultEffect {
+    RUN_LUA_TEST()
+}
+
 - (void)testSetDefaultOutput {
     RUN_LUA_TEST()
 }
@@ -133,6 +141,10 @@
 }
 
 - (void)testMute {
+    RUN_LUA_TEST()
+}
+
+- (void)testThru {
     RUN_LUA_TEST()
 }
 

@@ -1,3 +1,4 @@
+// Adapted from: https://github.com/kstenerud/KSCrash
 //
 //  SentryCrashStackCursor.h
 //
@@ -23,18 +24,19 @@
 //
 
 #include "SentryCrashStackCursor.h"
+#include "SentryCrashCPU.h"
 #include "SentryCrashSymbolicator.h"
 #include <stdlib.h>
 
-//#define SentryCrashLogger_LocalLevel TRACE
-#include "SentryCrashLogger.h"
+#include "SentryAsyncSafeLog.h"
 
 static bool
 g_advanceCursor(__unused SentryCrashStackCursor *cursor)
 {
-    SentryCrashLOG_WARN("No stack cursor has been set. For C++, this means that hooking "
-                        "__cxa_throw() failed for some reason. Embedded frameworks can cause "
-                        "this: https://github.com/getsentry/SentryCrash/issues/205");
+    SENTRY_ASYNC_SAFE_LOG_WARN(
+        "No stack cursor has been set. For C++, this means that hooking "
+        "__cxa_throw() failed for some reason. Embedded frameworks can cause "
+        "this: https://github.com/getsentry/SentryCrash/issues/205");
     return false;
 }
 
@@ -54,7 +56,7 @@ void
 sentrycrashsc_initCursor(SentryCrashStackCursor *cursor,
     void (*resetCursor)(SentryCrashStackCursor *), bool (*advanceCursor)(SentryCrashStackCursor *))
 {
-    cursor->symbolicate = sentrycrashsymbolicator_symbolicate;
+    cursor->symbolicate = sentrycrashsymbolicator_symbolicate_async_unsafe_sentryDlAddr;
     cursor->advanceCursor = advanceCursor != NULL ? advanceCursor : g_advanceCursor;
     cursor->resetCursor = resetCursor != NULL ? resetCursor : sentrycrashsc_resetCursor;
     cursor->resetCursor(cursor);

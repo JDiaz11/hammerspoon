@@ -1,53 +1,80 @@
-#import "SentryEvent.h"
-#import "NSDate+SentryExtras.h"
-#import "NSDictionary+SentrySanitize.h"
+#import "SentryANRTrackingIntegration.h"
 #import "SentryBreadcrumb.h"
 #import "SentryClient.h"
-#import "SentryCurrentDate.h"
 #import "SentryDebugMeta.h"
+#import "SentryDependencyContainer.h"
+#import "SentryEvent+Private.h"
 #import "SentryException.h"
-#import "SentryId.h"
+#import "SentryInternalDefines.h"
+#import "SentryLevelMapper.h"
 #import "SentryMessage.h"
 #import "SentryMeta.h"
+#import "SentryModels+Serializable.h"
+#import "SentryNSDictionarySanitize.h"
+#import "SentryRequest.h"
 #import "SentryStacktrace.h"
+#import "SentrySwift.h"
 #import "SentryThread.h"
+#import "SentryUser+Serialize.h"
 #import "SentryUser.h"
+
+#if SENTRY_HAS_METRIC_KIT
+#    import "SentryMechanism.h"
+#    import "SentryMetricKitIntegration.h"
+#endif // SENTRY_HAS_METRIC_KIT
 
 NS_ASSUME_NONNULL_BEGIN
 
 @implementation SentryEvent
 
+// This is a designated initializer so that it can be called by the Swift
+// sublcass that adds a `Decodable` conformance. It shares an implementation
+// with `initWithLevel:`.
 - (instancetype)init
 {
-    return [self initWithLevel:kSentryLevelNone];
+    self = [super init];
+    return [self commonInit:kSentryLevelNone];
 }
 
 - (instancetype)initWithLevel:(enum SentryLevel)level
 {
     self = [super init];
+    return [self commonInit:level];
+}
+
+- (instancetype)commonInit:(enum SentryLevel)level
+{
     if (self) {
         self.eventId = [[SentryId alloc] init];
         self.level = level;
-        self.platform = @"cocoa";
+        self.platform = SentryPlatformName;
+        self.timestamp = [SentryDependencyContainer.sharedInstance.dateProvider date];
     }
+    return self;
+}
+
+- (instancetype)initWithError:(NSError *)error
+{
+    self = [self initWithLevel:kSentryLevelError];
+    self.error = error;
     return self;
 }
 
 - (NSDictionary<NSString *, id> *)serialize
 {
     if (nil == self.timestamp) {
-        self.timestamp = [SentryCurrentDate date];
+        self.timestamp = [SentryDependencyContainer.sharedInstance.dateProvider date];
     }
 
     NSMutableDictionary *serializedData = @{
         @"event_id" : self.eventId.sentryIdString,
-        @"timestamp" : [self.timestamp sentry_toIso8601String],
-        @"platform" : @"cocoa",
+        @"timestamp" : @(self.timestamp.timeIntervalSince1970),
+        @"platform" : SentryPlatformName,
     }
                                               .mutableCopy;
 
     if (self.level != kSentryLevelNone) {
-        [serializedData setValue:SentryLevelNames[self.level] forKey:@"level"];
+        [serializedData setValue:nameForSentryLevel(self.level) forKey:@"level"];
     }
 
     [self addSimpleProperties:serializedData];
@@ -55,8 +82,9 @@ NS_ASSUME_NONNULL_BEGIN
 
     // This is important here, since we probably use __sentry internal extras
     // before
-    [serializedData setValue:[self.extra sentry_sanitize] forKey:@"extra"];
+    [serializedData setValue:sentry_sanitize(self.extra) forKey:@"extra"];
     [serializedData setValue:self.tags forKey:@"tags"];
+    SENTRY_LOG_DEBUG(@"Serialized event: %@", serializedData);
 
     return serializedData;
 }
@@ -103,15 +131,13 @@ NS_ASSUME_NONNULL_BEGIN
 
 - (void)addSimpleProperties:(NSMutableDictionary *)serializedData
 {
-    [serializedData setValue:self.sdk forKey:@"sdk"];
+    [serializedData setValue:sentry_sanitize(self.sdk) forKey:@"sdk"];
     [serializedData setValue:self.releaseName forKey:@"release"];
     [serializedData setValue:self.dist forKey:@"dist"];
     [serializedData setValue:self.environment forKey:@"environment"];
 
     if (self.transaction) {
         [serializedData setValue:self.transaction forKey:@"transaction"];
-    } else if (self.extra[@"__sentry_transaction"]) {
-        [serializedData setValue:self.extra[@"__sentry_transaction"] forKey:@"transaction"];
     }
 
     [serializedData setValue:self.fingerprint forKey:@"fingerprint"];
@@ -121,36 +147,79 @@ NS_ASSUME_NONNULL_BEGIN
 
     [serializedData setValue:[self.stacktrace serialize] forKey:@"stacktrace"];
 
-    [serializedData setValue:[self serializeBreadcrumbs] forKey:@"breadcrumbs"];
+    NSMutableArray *breadcrumbs = [self serializeBreadcrumbs];
+    if (self.serializedBreadcrumbs.count > 0) {
+        [breadcrumbs addObjectsFromArray:self.serializedBreadcrumbs];
+    }
+    if (breadcrumbs.count > 0) {
+        [serializedData setValue:breadcrumbs forKey:@"breadcrumbs"];
+    }
 
-    [serializedData setValue:self.context forKey:@"contexts"];
+    [serializedData setValue:sentry_sanitize(self.context) forKey:@"contexts"];
 
-    [serializedData setValue:[self.message serialize] forKey:@"message"];
+    if (nil != self.message) {
+        [serializedData setValue:[self.message serialize] forKey:@"message"];
+    }
     [serializedData setValue:self.logger forKey:@"logger"];
     [serializedData setValue:self.serverName forKey:@"server_name"];
     [serializedData setValue:self.type forKey:@"type"];
     if (nil != self.type && [self.type isEqualToString:@"transaction"]) {
         if (nil != self.startTimestamp) {
-            [serializedData setValue:[self.startTimestamp sentry_toIso8601String]
+            [serializedData setValue:@(self.startTimestamp.timeIntervalSince1970)
                               forKey:@"start_timestamp"];
         } else {
             // start timestamp should never be empty
-            [serializedData setValue:[self.timestamp sentry_toIso8601String]
+            [serializedData setValue:@(self.timestamp.timeIntervalSince1970)
                               forKey:@"start_timestamp"];
         }
     }
+
+    if (nil != self.request) {
+        [serializedData setValue:[self.request serialize] forKey:@"request"];
+    }
 }
 
-- (NSMutableArray *_Nullable)serializeBreadcrumbs
+- (NSMutableArray *)serializeBreadcrumbs
 {
     NSMutableArray *crumbs = [NSMutableArray new];
     for (SentryBreadcrumb *crumb in self.breadcrumbs) {
         [crumbs addObject:[crumb serialize]];
     }
-    if (crumbs.count <= 0) {
-        return nil;
-    }
     return crumbs;
+}
+
+#if SENTRY_HAS_METRIC_KIT
+
+- (BOOL)isMetricKitEvent
+{
+    if (self.exceptions == nil || self.exceptions.count != 1) {
+        return NO;
+    }
+
+    NSArray<NSString *> *metricKitMechanisms = @[
+        SentryMetricKitDiskWriteExceptionMechanism, SentryMetricKitCpuExceptionMechanism,
+        SentryMetricKitHangDiagnosticMechanism, @"MXCrashDiagnostic"
+    ];
+
+    SentryException *exception = self.exceptions[0];
+    if (exception.mechanism != nil &&
+        [metricKitMechanisms
+            containsObject:SENTRY_UNWRAP_NULLABLE(NSString, exception.mechanism).type]) {
+        return YES;
+    } else {
+        return NO;
+    }
+}
+
+#endif // SENTRY_HAS_METRIC_KIT
+
+- (BOOL)isAppHangEvent
+{
+    return self.exceptions.count == 1 &&
+        [SentryAppHangTypeMapper
+            isExceptionTypeAppHangWithExceptionType:SENTRY_UNWRAP_NULLABLE(
+                                                        NSString, self.exceptions.firstObject)
+                                                        .type];
 }
 
 @end

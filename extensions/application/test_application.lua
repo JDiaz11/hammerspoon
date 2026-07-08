@@ -13,7 +13,7 @@ function testInitWithPid()
   for _,app in pairs(apps) do
     local pidApp = hs.application.applicationForPID(app:pid())
     if pidApp == nil then
-      assertIsEqual(app:name(), nil) -- works in XCode now, but still not in GithubActions
+      assertIsEqual(app:name(), nil) -- works in XCode now, but still not in GitHubActions
     end
     assertIsEqual(app:name(), pidApp:name())
   end
@@ -252,5 +252,24 @@ end
 function testUTI()
   local bundle = hs.application.defaultAppForUTI('public.jpeg')
   assertIsEqual("com.apple.Preview", bundle)
+  return success()
+end
+
+function testLocalizationFunctions()
+  local appPath = "/Applications/Safari.app"
+  local bundleID = "com.apple.Safari"
+
+  local localizationsForBundleID = hs.application.localizationsForBundleID(bundleID)
+  assertIsTable(localizationsForBundleID)
+
+  local preferredLocalizationsForBundleID = hs.application.preferredLocalizationsForBundleID(bundleID)
+  assertIsTable(preferredLocalizationsForBundleID)
+
+  local localizationsForBundlePath = hs.application.localizationsForBundlePath(appPath)
+  assertIsTable(localizationsForBundlePath)
+
+  local preferredLocalizationsForBundlePath = hs.application.preferredLocalizationsForBundlePath(appPath)
+  assertIsTable(preferredLocalizationsForBundlePath)
+
   return success()
 end

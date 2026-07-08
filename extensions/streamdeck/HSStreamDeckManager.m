@@ -12,24 +12,103 @@
 
 static char *inputBuffer = NULL;
 
-static void HIDReport(void* deviceRef, IOReturn result, void* sender, IOHIDReportType type, uint32_t reportID, uint8_t *report,CFIndex reportLength) {
+static void HIDReport(void* deviceRef, IOReturn result, void* sender, IOHIDReportType type, uint32_t reportID, uint8_t *report, CFIndex reportLength) {
     HSStreamDeckDevice *device = (__bridge HSStreamDeckDevice*)deviceRef;
-    NSMutableArray* buttonReport = [NSMutableArray arrayWithCapacity:device.keyCount+1];
+    
+    uint8_t inputType = report[1];
+    if (inputType == 0x00 || inputType == 0x01) { // An `inputType` of `0x01` was observed for button 1 on a Stream Deck Mini (Model 20GAI9901).
+        // -------------
+        // BUTTON EVENT:
+        // -------------
+        NSMutableArray* buttonReport = [NSMutableArray arrayWithCapacity:device.keyCount+1];
 
-    // We need an unused button at slot zero - all our uses of these arrays are one-indexed
-    [buttonReport setObject:[NSNumber numberWithInt:0] atIndexedSubscript:0];
+        // We need an unused button at slot zero - all our uses of these arrays are one-indexed
+        [buttonReport setObject:[NSNumber numberWithInt:0] atIndexedSubscript:0];
 
-    for(int p=1; p <= device.keyCount; p++) {
-        [buttonReport setObject:@0 atIndexedSubscript:p];
+        for(int p=1; p <= device.keyCount; p++) {
+            [buttonReport setObject:@0 atIndexedSubscript:p];
+        }
+
+        uint8_t *start = report + device.dataKeyOffset;
+        for(int button=1; button <= device.keyCount; button ++) {
+            NSNumber* val = [NSNumber numberWithInt:start[button-1]];
+            int translatedButton = [device transformKeyIndex:button];
+            [buttonReport setObject:val atIndexedSubscript:translatedButton];
+        }
+        [device deviceDidSendInput:buttonReport];
+    } else if (inputType == 0x02) {
+        // ----------
+        // LCD EVENT:
+        // ----------
+        NSString *eventTypeString = @"Unknown";
+        uint16_t startX = ((uint16_t)report[6]) | (((uint16_t)report[7]) << 8);
+        uint16_t startY = ((uint16_t)report[8]) | (((uint16_t)report[9]) << 8);
+        uint16_t endX = 0;
+        uint16_t endY = 0;
+        
+        uint8_t eventType = report[4];
+        if (eventType == 0x01) {
+            // ------------
+            // SHORT PRESS:
+            // ------------
+            eventTypeString = @"shortPress";
+        } else if (eventType == 0x02) {
+            // -----------
+            // LONG PRESS:
+            // -----------
+            eventTypeString = @"longPress";
+        } else if (eventType == 0x03) {
+            // ------
+            // SWIPE:
+            // ------
+            eventTypeString = @"swipe";
+            endX = ((uint16_t)report[10]) | (((uint16_t)report[11]) << 8);
+            endY = ((uint16_t)report[12]) | (((uint16_t)report[13]) << 8);
+        }
+        
+        [device deviceDidSendScreenTouch:eventTypeString startX:startX startY:startY endX:endX endY:endY];
+    } else if (inputType == 0x03) {
+        // --------------
+        // ENCODER EVENT:
+        // --------------
+        uint8_t eventType = report[4];
+        if (eventType == 0x00) {
+            // ----------------------
+            // ENCODER PRESS/RELEASE:
+            // ----------------------
+            NSMutableArray* buttonReport = [NSMutableArray arrayWithCapacity:device.encoderCount+1];
+
+            // We need an unused button at slot zero - all our uses of these arrays are one-indexed
+            [buttonReport setObject:[NSNumber numberWithInt:0] atIndexedSubscript:0];
+
+            for(int p=1; p <= device.encoderCount; p++) {
+                [buttonReport setObject:@0 atIndexedSubscript:p];
+            }
+
+            uint8_t *start = report + device.dataEncoderOffset;
+            for(int button=1; button <= device.encoderCount; button ++) {
+                NSNumber* val = [NSNumber numberWithInt:start[button-1]];
+                int translatedButton = [device transformKeyIndex:button];
+                [buttonReport setObject:val atIndexedSubscript:translatedButton];
+            }
+            [device deviceDidSendEncoderInput:buttonReport];
+        } else if (eventType == 0x01) {
+            // -------------
+            // ENCODER TURN:
+            // -------------
+            uint8_t *start = report + device.dataEncoderOffset;
+            for(int button=1; button <= device.encoderCount; button ++) {
+                int value = start[button-1];
+                if (value > 0) {
+                    BOOL turningLeft = NO;
+                    if (value >= 200) {
+                        turningLeft = YES;
+                    }
+                    [device deviceDidSendEncoderTurnWithButton:[NSNumber numberWithInt:button] turningLeft:turningLeft];
+                }
+            }
+        }
     }
-
-    uint8_t *start = report + device.dataKeyOffset;
-    for(int button=1; button <= device.keyCount; button ++) {
-        NSNumber* val = [NSNumber numberWithInt:start[button-1]];
-        int translatedButton = [device transformKeyIndex:button];
-        [buttonReport setObject:val atIndexedSubscript:translatedButton];
-    }
-    [device deviceDidSendInput:buttonReport];
 }
 
 static void HIDconnect(void *context, IOReturn result, void *sender, IOHIDDeviceRef device) {
@@ -73,14 +152,29 @@ static void HIDdisconnect(void *context, IOReturn result, void *sender, IOHIDDev
                                           productIDKey: @USB_PID_STREAMDECK_ORIGINAL_V2};
         NSDictionary *matchMini       = @{vendorIDKey:  @USB_VID_ELGATO,
                                           productIDKey: @USB_PID_STREAMDECK_MINI};
-        NSDictionary *matchXL         = @{vendorIDKey: @USB_VID_ELGATO,
+        NSDictionary *matchMiniV2     = @{vendorIDKey:  @USB_VID_ELGATO,
+                                          productIDKey: @USB_PID_STREAMDECK_MINI_V2};
+        NSDictionary *matchXL         = @{vendorIDKey:  @USB_VID_ELGATO,
                                           productIDKey: @USB_PID_STREAMDECK_XL};
+        NSDictionary *matchXLV2       = @{vendorIDKey:  @USB_VID_ELGATO,
+                                          productIDKey: @USB_PID_STREAMDECK_XL_V2};
+        NSDictionary *matchMk2        = @{vendorIDKey:  @USB_VID_ELGATO,
+                                          productIDKey: @USB_PID_STREAMDECK_MK2};
+        NSDictionary *matchPlus       = @{vendorIDKey:  @USB_VID_ELGATO,
+                                          productIDKey: @USB_PID_STREAMDECK_PLUS};
+        NSDictionary *matchPedal      = @{vendorIDKey:  @USB_VID_ELGATO,
+                                          productIDKey: @USB_PID_STREAMDECK_PEDAL};
 
         IOHIDManagerSetDeviceMatchingMultiple((__bridge IOHIDManagerRef)self.ioHIDManager,
                                               (__bridge CFArrayRef)@[matchOriginal,
                                                                      matchOriginalv2,
                                                                      matchMini,
-                                                                     matchXL]);
+                                                                     matchMiniV2,
+                                                                     matchXL,
+                                                                     matchXLV2,
+                                                                     matchMk2,
+                                                                     matchPlus,
+                                                                     matchPedal]);
 
         // Add our callbacks for relevant events
         IOHIDManagerRegisterDeviceMatchingCallback((__bridge IOHIDManagerRef)self.ioHIDManager,
@@ -134,6 +228,20 @@ static void HIDdisconnect(void *context, IOReturn result, void *sender, IOHIDDev
 }
 
 - (HSStreamDeckDevice*)deviceDidConnect:(IOHIDDeviceRef)device {
+    LuaSkin *skin = [LuaSkin sharedWithState:NULL];
+    _lua_stackguard_entry(skin.L);
+
+    if (![skin checkGCCanary:self.lsCanary]) {
+        _lua_stackguard_exit(skin.L);
+        return nil;
+    }
+
+    if (self.discoveryCallbackRef == LUA_NOREF || self.discoveryCallbackRef == LUA_REFNIL) {
+        [skin logWarn:@"hs.streamdeck detected a device connecting, but no discovery callback has been set. See hs.streamdeck.discoveryCallback()"];
+        _lua_stackguard_exit(skin.L);
+        return nil;
+    }
+
     NSNumber *vendorID = (__bridge NSNumber *)IOHIDDeviceGetProperty(device, CFSTR(kIOHIDVendorIDKey));
     NSNumber *productID = (__bridge NSNumber *)IOHIDDeviceGetProperty(device, CFSTR(kIOHIDProductIDKey));
 
@@ -152,15 +260,35 @@ static void HIDdisconnect(void *context, IOReturn result, void *sender, IOHIDDev
         case USB_PID_STREAMDECK_MINI:
             deck = [[HSStreamDeckDeviceMini alloc] initWithDevice:device manager:self];
             break;
+            
+        case USB_PID_STREAMDECK_MINI_V2:
+            deck = [[HSStreamDeckDeviceMini alloc] initWithDevice:device manager:self];
+            break;
 
         case USB_PID_STREAMDECK_XL:
             deck = [[HSStreamDeckDeviceXL alloc] initWithDevice:device manager:self];
             break;
-
+            
+        case USB_PID_STREAMDECK_XL_V2:
+            deck = [[HSStreamDeckDeviceXL alloc] initWithDevice:device manager:self];
+            break;
+            
         case USB_PID_STREAMDECK_ORIGINAL_V2:
             deck = [[HSStreamDeckDeviceOriginalV2 alloc] initWithDevice:device manager:self];
             break;
 
+        case USB_PID_STREAMDECK_MK2:
+            deck = [[HSStreamDeckDeviceMk2 alloc] initWithDevice:device manager:self];
+            break;
+
+        case USB_PID_STREAMDECK_PLUS:
+            deck = [[HSStreamDeckDevicePlus alloc] initWithDevice:device manager:self];
+            break;
+        
+        case USB_PID_STREAMDECK_PEDAL:
+            deck = [[HSStreamDeckDevicePedal alloc] initWithDevice:device manager:self];
+            break;
+            
         default:
             NSLog(@"deviceDidConnect from unknown device: %d", productID.intValue);
             break;
@@ -169,19 +297,14 @@ static void HIDdisconnect(void *context, IOReturn result, void *sender, IOHIDDev
         NSLog(@"deviceDidConnect: no HSStreamDeckDevice was created, ignoring");
         return nil;
     }
+    deck.lsCanary = [skin createGCCanary];
     [deck initialiseCaches];
     [self.devices addObject:deck];
 
-    LuaSkin *skin = [LuaSkin sharedWithState:NULL];
-    _lua_stackguard_entry(skin.L);
-    if (self.discoveryCallbackRef == LUA_NOREF || self.discoveryCallbackRef == LUA_REFNIL) {
-        [skin logWarn:@"hs.streamdeck detected a device connecting, but no discovery callback has been set. See hs.streamdeck.discoveryCallback()"];
-    } else {
-        [skin pushLuaRef:streamDeckRefTable ref:self.discoveryCallbackRef];
-        lua_pushboolean(skin.L, 1);
-        [skin pushNSObject:deck];
-        [skin protectedCallAndError:@"hs.streamdeck:deviceDidConnect" nargs:2 nresults:0];
-    }
+    [skin pushLuaRef:streamDeckRefTable ref:self.discoveryCallbackRef];
+    lua_pushboolean(skin.L, 1);
+    [skin pushNSObject:deck];
+    [skin protectedCallAndError:@"hs.streamdeck:deviceDidConnect" nargs:2 nresults:0];
 
     //NSLog(@"Created deck device: %p", (__bridge void*)deviceId);
     //NSLog(@"Now have %lu devices", self.devices.count);
@@ -190,11 +313,18 @@ static void HIDdisconnect(void *context, IOReturn result, void *sender, IOHIDDev
 }
 
 - (void)deviceDidDisconnect:(IOHIDDeviceRef)device {
+    LuaSkin *skin = [LuaSkin sharedWithState:NULL];
+    _lua_stackguard_entry(skin.L);
+
+    if (![skin checkGCCanary:self.lsCanary]) {
+        _lua_stackguard_exit(skin.L);
+        return;
+    }
+
     for (HSStreamDeckDevice *deckDevice in self.devices) {
         if (deckDevice.device == device) {
             [deckDevice invalidate];
-            LuaSkin *skin = [LuaSkin sharedWithState:NULL];
-            _lua_stackguard_entry(skin.L);
+
             if (self.discoveryCallbackRef == LUA_NOREF || self.discoveryCallbackRef == LUA_REFNIL) {
                 [skin logWarn:@"hs.streamdeck detected a device disconnecting, but no callback has been set. See hs.streamdeck.discoveryCallback()"];
             } else {
@@ -204,12 +334,17 @@ static void HIDdisconnect(void *context, IOReturn result, void *sender, IOHIDDev
                 [skin protectedCallAndError:@"hs.streamdeck:deviceDidDisconnect" nargs:2 nresults:0];
             }
 
+            LSGCCanary tmpLSUUID = deckDevice.lsCanary;
+            [skin destroyGCCanary:&tmpLSUUID];
+            deckDevice.lsCanary = tmpLSUUID;
+
             [self.devices removeObject:deckDevice];
             _lua_stackguard_exit(skin.L);
             return;
         }
     }
     NSLog(@"ERROR: A Stream Deck was disconnected that we didn't know about");
+    _lua_stackguard_exit(skin.L);
     return;
 }
 

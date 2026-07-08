@@ -30,6 +30,8 @@
 @property(nonatomic, retain) NSString *fontName;
 @property(nonatomic) CGFloat fontSize;
 @property(nonatomic) BOOL searchSubText;
+@property(nonatomic) BOOL enableDefaultForQuery;
+
 @property(nonatomic) NSColor *fgColor;
 @property(nonatomic) NSColor *subTextColor;
 
@@ -56,7 +58,7 @@
 @property(nonatomic) int invalidCallbackRef;
 
 // A pointer to the hs.chooser module's references table
-@property(nonatomic) int *refTable;
+@property(nonatomic) LSRefTable refTable;
 
 // Our self-ref count
 @property(nonatomic) int selfRefCount;
@@ -65,7 +67,7 @@
 @property(nonatomic) BOOL isObservingThemeChanges;
 
 // Initialiser
-- (id)initWithRefTable:(int *)refTable completionCallbackRef:(int)completionCallbackRef;
+- (id)initWithRefTable:(LSRefTable )refTable completionCallbackRef:(int)completionCallbackRef;
 
 // Setup/display related methods
 - (void)calculateRects;
@@ -85,7 +87,7 @@
 - (void)tableView:(NSTableView *)tableView didClickedRow:(NSInteger)row;
 - (void)didRightClickAtRow:(NSInteger)row;
 
-// NSTextFieldDelgate
+// NSTextFieldDelegate
 
 // Actions
 - (IBAction)queryDidPressEnter:(id)sender;

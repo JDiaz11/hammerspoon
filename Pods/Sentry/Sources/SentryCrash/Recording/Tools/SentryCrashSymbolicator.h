@@ -1,3 +1,4 @@
+// Adapted from: https://github.com/kstenerud/KSCrash
 //
 //  SentryCrashSymbolicator.h
 //
@@ -25,12 +26,12 @@
 #ifndef SentryCrashSymbolicator_h
 #define SentryCrashSymbolicator_h
 
+#import "SentryCrashStackCursor.h"
+#include <stdbool.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-#include "SentryCrashStackCursor.h"
-#include <stdbool.h>
 
 /** Symbolicate a stack cursor.
  *
@@ -38,7 +39,11 @@ extern "C" {
  *
  * @return True if successful.
  */
-bool sentrycrashsymbolicator_symbolicate(SentryCrashStackCursor *cursor);
+bool sentrycrashsymbolicator_symbolicate_async_unsafe_sentryDlAddr(SentryCrashStackCursor *cursor);
+
+/** Same as ``sentrycrashsymbolicator_symbolicate_async_unsafe_sentryDlAddr`` but faster.
+ */
+bool sentrycrashsymbolicator_symbolicate_async_unsafe(SentryCrashStackCursor *cursor);
 
 #ifdef __cplusplus
 }

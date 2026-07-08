@@ -1,3 +1,4 @@
+// Adapted from: https://github.com/kstenerud/KSCrash
 //
 //  SentryCrashStackCursor_MachineContext.c
 //
@@ -29,8 +30,7 @@
 
 #include <stdlib.h>
 
-#define SentryCrashLogger_LocalLevel TRACE
-#include "SentryCrashLogger.h"
+#include "SentryAsyncSafeLog.h"
 
 /** Represents an entry in a frame list.
  * This is modeled after the various i386/x64 frame walkers in the xnu source,
@@ -68,7 +68,7 @@ advanceCursor(SentryCrashStackCursor *cursor)
     if (context->instructionAddress == 0) {
         context->instructionAddress = sentrycrashcpu_instructionAddress(context->machineContext);
         if (context->instructionAddress == 0) {
-            return false;
+            goto tryAsyncChain;
         }
         nextAddress = context->instructionAddress;
         goto successfulExit;
@@ -85,7 +85,7 @@ advanceCursor(SentryCrashStackCursor *cursor)
 
     if (context->currentFrame.previous == NULL) {
         if (context->isPastFramePointer) {
-            return false;
+            goto tryAsyncChain;
         }
         context->currentFrame.previous
             = (struct FrameEntry *)sentrycrashcpu_framePointer(context->machineContext);
@@ -97,7 +97,7 @@ advanceCursor(SentryCrashStackCursor *cursor)
         return false;
     }
     if (context->currentFrame.previous == 0 || context->currentFrame.return_address == 0) {
-        return false;
+        goto tryAsyncChain;
     }
 
     nextAddress = context->currentFrame.return_address;
@@ -106,6 +106,9 @@ successfulExit:
     cursor->stackEntry.address = sentrycrashcpu_normaliseInstructionPointer(nextAddress);
     cursor->state.currentDepth++;
     return true;
+
+tryAsyncChain:
+    return false;
 }
 
 static void

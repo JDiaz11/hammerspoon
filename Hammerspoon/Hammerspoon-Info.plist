@@ -192,7 +192,11 @@
 		</dict>
 	</array>
 	<key>CFBundleVersion</key>
-	<string>5614</string>
+	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>INIntentsSupported</key>
+	<array>
+		<string>HSExecuteLuaIntent</string>
+	</array>
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.developer-tools</string>
 	<key>LSMinimumSystemVersion</key>
@@ -254,6 +258,11 @@
 				<string>public.item</string>
 			</array>
 		</dict>
+	</array>
+	<key>NSUserActivityTypes</key>
+	<array>
+		<string>HSExecuteLuaIntent</string>
+		<string>NSUserActivityTypeBrowsingWeb</string>
 	</array>
 	<key>NSUserNotificationAlertStyle</key>
 	<string>alert</string>

@@ -30,7 +30,7 @@
 @interface HSuielementWatcher : NSObject
 @property (nonatomic) int selfRefCount;
 @property (nonatomic) AXUIElementRef elementRef;
-@property (nonatomic) int refTable;
+@property (nonatomic) LSRefTable refTable;
 @property (nonatomic) int handlerRef;
 @property (nonatomic) int userDataRef;
 @property (nonatomic) int watcherRef;
@@ -38,6 +38,7 @@
 @property (nonatomic) BOOL running;
 @property (nonatomic) pid_t pid;
 @property (nonatomic) BOOL watchDestroyed;
+@property (nonatomic) LSGCCanary lsCanary;
 
 -(HSuielementWatcher *)initWithElement:(HSuielement *)element callbackRef:(int)callbackRef userdataRef:(int)userdataRef;
 -(void)dealloc;
@@ -68,6 +69,10 @@
 +(NSString *)pathForBundleID:(NSString *)bundleID;
 +(NSDictionary *)infoForBundleID:(NSString *)bundleID;
 +(NSDictionary *)infoForBundlePath:(NSString *)bundlePath;
++(NSArray *)preferredLocalizationsForBundleID:(NSString *)bundleID;
++(NSArray *)preferredLocalizationsForBundlePath:(NSString *)bundlePath;
++(NSArray *)localizationsForBundlePath:(NSString *)bundlePath;
++(NSArray *)localizationsForBundleID:(NSString *)bundleID;
 
 // Class methods that return arrays of applications
 +(NSArray<HSapplication *>*)runningApplicationsWithState:(lua_State *)L;
@@ -147,6 +152,7 @@
 -(void)setTopLeft:(NSPoint)topLeft;
 -(NSSize)getSize;
 -(void)setSize:(NSSize)size;
+-(void)setFrame:(NSRect)frame;
 -(BOOL)pushButton:(CFStringRef)buttonId;
 -(void)toggleZoom;
 -(NSRect)getZoomButtonRect;

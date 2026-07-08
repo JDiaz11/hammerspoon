@@ -1,12 +1,26 @@
 #import <Foundation/Foundation.h>
-
-#import "SentryDefines.h"
-#import "SentrySerializable.h"
+#if __has_include(<Sentry/Sentry.h>)
+#    import <Sentry/SentryDefines.h>
+#elif __has_include(<SentryWithoutUIKit/Sentry.h>)
+#    import <SentryWithoutUIKit/SentryDefines.h>
+#else
+#    import <SentryDefines.h>
+#endif
+#if !SDK_V9
+#    import SENTRY_HEADER(SentrySerializable)
+#endif
 
 NS_ASSUME_NONNULL_BEGIN
 
+@class SentryNSError;
+@class SentryMechanismMeta;
+
 NS_SWIFT_NAME(Mechanism)
-@interface SentryMechanism : NSObject <SentrySerializable>
+@interface SentryMechanism : NSObject
+#if !SDK_V9
+                             <SentrySerializable>
+#endif
+
 SENTRY_NO_INIT
 
 /**
@@ -16,8 +30,8 @@ SENTRY_NO_INIT
 @property (nonatomic, copy) NSString *type;
 
 /**
- * Human readable description of the error mechanism and a possible
- * hint on how to solve this error
+ * Human readable description of the error mechanism and a possible hint on how to solve this error.
+ * We can't use description as it overlaps with NSObject.description.
  */
 @property (nonatomic, copy) NSString *_Nullable desc;
 
@@ -29,9 +43,15 @@ SENTRY_NO_INIT
 
 /**
  * Flag indicating whether the exception has been handled by the user
- * (e.g. via ``try..catch``)
+ * (e.g. via @c try..catch )
  */
 @property (nonatomic, copy) NSNumber *_Nullable handled;
+
+/**
+ * An optional flag indicating a synthetic exception. For more info visit
+ * https://develop.sentry.dev/sdk/event-payloads/exception/#exception-mechanism.
+ */
+@property (nonatomic, copy, nullable) NSNumber *synthetic;
 
 /**
  * Fully qualified URL to an online help resource, possible
@@ -41,9 +61,9 @@ SENTRY_NO_INIT
 
 /**
  * Information from the operating system or runtime on the exception
- * mechanism
+ * mechanism.
  */
-@property (nonatomic, strong) NSDictionary<NSString *, NSString *> *_Nullable meta;
+@property (nullable, nonatomic, strong) SentryMechanismMeta *meta;
 
 /**
  * Initialize an SentryMechanism with a type

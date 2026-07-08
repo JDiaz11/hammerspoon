@@ -7,12 +7,17 @@
 //
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wvariadic-macros"
+#define SENTRY_NO_UIKIT 1
 #import "Sentry.h"
 #pragma clang diagnostic pop
 
+#ifndef NO_INTENTS
+#import "HSExecuteLuaIntentHandler.h"
+#endif
+
 @protocol HSOpenFileDelegate <NSObject>
 
--(void)callbackWithURL:(NSString *)openUrl;
+-(void)callbackWithURL:(NSString *)openUrl senderPID:(pid_t)pid;
 
 @end
 

@@ -1,3 +1,4 @@
+// Adapted from: https://github.com/kstenerud/KSCrash
 //
 //  SentryCrashCPU_arm64_Apple.c
 //
@@ -32,14 +33,13 @@
 #    include "SentryCrashMachineContext_Apple.h"
 #    include <stdlib.h>
 
-//#define SentryCrashLogger_LocalLevel TRACE
-#    include "SentryCrashLogger.h"
+#    include "SentryAsyncSafeLog.h"
 
 #    define KSPACStrippingMask_ARM64e 0x0000000fffffffff
 
 static const char *g_registerNames[] = { "x0", "x1", "x2", "x3", "x4", "x5", "x6", "x7", "x8", "x9",
     "x10", "x11", "x12", "x13", "x14", "x15", "x16", "x17", "x18", "x19", "x20", "x21", "x22",
-    "x23", "x24", "x25", "x26", "x27", "x28", "x29", "fp", "lr", "sp", "pc", "cpsr" };
+    "x23", "x24", "x25", "x26", "x27", "x28", "fp", "lr", "sp", "pc", "cpsr" };
 static const int g_registerNamesCount = sizeof(g_registerNames) / sizeof(*g_registerNames);
 
 static const char *g_exceptionRegisterNames[] = { "exception", "esr", "far" };
@@ -52,7 +52,7 @@ sentrycrashcpu_framePointer(const SentryCrashMachineContext *const context)
     // We don't want this from stopping us to enable warnings as errors. This needs to be fixed.
 #    pragma clang diagnostic push
 #    pragma GCC diagnostic ignored "-Wshorten-64-to-32"
-    return context->machineContext.__ss.__fp;
+    return arm_thread_state64_get_fp(context->machineContext.__ss);
 #    pragma clang diagnostic pop
 }
 
@@ -62,7 +62,7 @@ sentrycrashcpu_stackPointer(const SentryCrashMachineContext *const context)
     // We don't want this from stopping us to enable warnings as errors. This needs to be fixed.
 #    pragma clang diagnostic push
 #    pragma GCC diagnostic ignored "-Wshorten-64-to-32"
-    return context->machineContext.__ss.__sp;
+    return arm_thread_state64_get_sp(context->machineContext.__ss);
 #    pragma clang diagnostic pop
 }
 
@@ -72,7 +72,7 @@ sentrycrashcpu_instructionAddress(const SentryCrashMachineContext *const context
     // We don't want this from stopping us to enable warnings as errors. This needs to be fixed.
 #    pragma clang diagnostic push
 #    pragma GCC diagnostic ignored "-Wshorten-64-to-32"
-    return context->machineContext.__ss.__pc;
+    return arm_thread_state64_get_pc(context->machineContext.__ss);
 #    pragma clang diagnostic pop
 }
 
@@ -82,7 +82,7 @@ sentrycrashcpu_linkRegister(const SentryCrashMachineContext *const context)
     // We don't want this from stopping us to enable warnings as errors. This needs to be fixed.
 #    pragma clang diagnostic push
 #    pragma GCC diagnostic ignored "-Wshorten-64-to-32"
-    return context->machineContext.__ss.__lr;
+    return arm_thread_state64_get_lr(context->machineContext.__ss);
 #    pragma clang diagnostic pop
 }
 
@@ -116,24 +116,24 @@ sentrycrashcpu_registerName(const int regNumber)
 uint64_t
 sentrycrashcpu_registerValue(const SentryCrashMachineContext *const context, const int regNumber)
 {
-    if (regNumber <= 29) {
+    if (regNumber < 29) {
         return context->machineContext.__ss.__x[regNumber];
     }
 
     switch (regNumber) {
+    case 29:
+        return arm_thread_state64_get_fp(context->machineContext.__ss);
     case 30:
-        return context->machineContext.__ss.__fp;
+        return arm_thread_state64_get_lr(context->machineContext.__ss);
     case 31:
-        return context->machineContext.__ss.__lr;
+        return arm_thread_state64_get_sp(context->machineContext.__ss);
     case 32:
-        return context->machineContext.__ss.__sp;
+        return arm_thread_state64_get_pc(context->machineContext.__ss);
     case 33:
-        return context->machineContext.__ss.__pc;
-    case 34:
         return context->machineContext.__ss.__cpsr;
     }
 
-    SentryCrashLOG_ERROR("Invalid register number: %d", regNumber);
+    SENTRY_ASYNC_SAFE_LOG_ERROR("Invalid register number: %d", regNumber);
     return 0;
 }
 
@@ -149,7 +149,7 @@ sentrycrashcpu_exceptionRegisterName(const int regNumber)
     if (regNumber < sentrycrashcpu_numExceptionRegisters()) {
         return g_exceptionRegisterNames[regNumber];
     }
-    SentryCrashLOG_ERROR("Invalid register number: %d", regNumber);
+    SENTRY_ASYNC_SAFE_LOG_ERROR("Invalid register number: %d", regNumber);
     return NULL;
 }
 
@@ -166,7 +166,7 @@ sentrycrashcpu_exceptionRegisterValue(
         return context->machineContext.__es.__far;
     }
 
-    SentryCrashLOG_ERROR("Invalid register number: %d", regNumber);
+    SENTRY_ASYNC_SAFE_LOG_ERROR("Invalid register number: %d", regNumber);
     return 0;
 }
 

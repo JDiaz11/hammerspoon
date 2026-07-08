@@ -1,12 +1,23 @@
-#import "SentryDefines.h"
-#import "SentrySerializable.h"
+#if __has_include(<Sentry/Sentry.h>)
+#    import <Sentry/SentryDefines.h>
+#elif __has_include(<SentryWithoutUIKit/Sentry.h>)
+#    import <SentryWithoutUIKit/SentryDefines.h>
+#else
+#    import <SentryDefines.h>
+#endif
+#if !SDK_V9
+#    import SENTRY_HEADER(SentrySerializable)
+#endif
 
 NS_ASSUME_NONNULL_BEGIN
 
 @class SentryStacktrace;
 
-NS_SWIFT_NAME(Thread)
-@interface SentryThread : NSObject <SentrySerializable>
+@interface SentryThread : NSObject
+#if !SDK_V9
+                          <SentrySerializable>
+#endif
+
 SENTRY_NO_INIT
 
 /**
@@ -17,22 +28,27 @@ SENTRY_NO_INIT
 /**
  * Name (if available) of the thread
  */
-@property (nonatomic, copy) NSString *_Nullable name;
+@property (nullable, nonatomic, copy) NSString *name;
 
 /**
  * SentryStacktrace of the SentryThread
  */
-@property (nonatomic, strong) SentryStacktrace *_Nullable stacktrace;
+@property (nullable, nonatomic, strong) SentryStacktrace *stacktrace;
 
 /**
  * Did this thread crash?
  */
-@property (nonatomic, copy) NSNumber *_Nullable crashed;
+@property (nullable, nonatomic, copy) NSNumber *crashed;
 
 /**
  * Was it the current thread.
  */
-@property (nonatomic, copy) NSNumber *_Nullable current;
+@property (nullable, nonatomic, copy) NSNumber *current;
+
+/**
+ * Was it the main thread?
+ */
+@property (nullable, nonatomic, copy) NSNumber *isMain;
 
 /**
  * Initializes a SentryThread with its id

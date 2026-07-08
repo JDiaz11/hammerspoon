@@ -1,3 +1,4 @@
+// Adapted from: https://github.com/kstenerud/KSCrash
 //
 //  SentryCrashStackCursor.h
 //
@@ -25,14 +26,13 @@
 #ifndef SentryCrashStackCursor_h
 #define SentryCrashStackCursor_h
 
+#include "SentryCrashMachineContext.h"
+#include <stdbool.h>
+#include <sys/types.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-#include "SentryCrashMachineContext.h"
-
-#include <stdbool.h>
-#include <sys/types.h>
 
 #define SentryCrashSC_CONTEXT_SIZE 100
 
@@ -40,25 +40,31 @@ extern "C" {
  */
 #define SentryCrashSC_STACK_OVERFLOW_THRESHOLD 150
 
+/** A special marker frame being yielded as `address` to denote a chained async stacktrace. */
+#define SentryCrashSC_ASYNC_MARKER (UINTPTR_MAX - 1234)
+
+typedef struct {
+    /** Current address in the stack trace. */
+    uintptr_t address;
+
+    /** The name (if any) of the binary image the current address falls
+     * inside. */
+    const char *imageName;
+
+    /** The starting address of the binary image the current address falls
+     * inside. */
+    uintptr_t imageAddress;
+
+    /** The name (if any) of the closest symbol to the current address. */
+    const char *symbolName;
+
+    /** The address of the closest symbol to the current address. */
+    uintptr_t symbolAddress;
+} SentryCrashStackEntry;
+
 typedef struct SentryCrashStackCursor {
-    struct {
-        /** Current address in the stack trace. */
-        uintptr_t address;
+    SentryCrashStackEntry stackEntry;
 
-        /** The name (if any) of the binary image the current address falls
-         * inside. */
-        const char *imageName;
-
-        /** The starting address of the binary image the current address falls
-         * inside. */
-        uintptr_t imageAddress;
-
-        /** The name (if any) of the closest symbol to the current address. */
-        const char *symbolName;
-
-        /** The address of the closest symbol to the current address. */
-        uintptr_t symbolAddress;
-    } stackEntry;
     struct {
         /** Current depth as we walk the stack (1-based). */
         int currentDepth;

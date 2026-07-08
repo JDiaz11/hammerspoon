@@ -1,12 +1,13 @@
-#import "SentryIntegrationProtocol.h"
-#import <Foundation/Foundation.h>
+#import "SentryBaseIntegration.h"
+#import "SentryBreadcrumbDelegate.h"
 
 NS_ASSUME_NONNULL_BEGIN
 
 /**
  * This automatically adds breadcrumbs for different user actions.
  */
-@interface SentryAutoBreadcrumbTrackingIntegration : NSObject <SentryIntegrationProtocol>
+@interface SentryAutoBreadcrumbTrackingIntegration
+    : SentryBaseIntegration <SentryBreadcrumbDelegate>
 
 @end
 
